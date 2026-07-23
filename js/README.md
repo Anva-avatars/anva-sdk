@@ -5,11 +5,11 @@ ESM, zero dependencies, typed. Node 18+ and modern browsers (keep your API
 key server-side; hand only the `embed_url` to clients).
 
 ```bash
-npm install anva
+npm install anva-sdk
 ```
 
 ```js
-import { Anva } from "anva";
+import { Anva } from "anva-sdk";
 
 const client = new Anva(process.env.ANVA_KEY);
 

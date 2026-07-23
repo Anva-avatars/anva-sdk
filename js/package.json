@@ -1,5 +1,5 @@
 {
-  "name": "anva",
+  "name": "anva-sdk",
   "version": "0.1.0",
   "description": "Official JavaScript/TypeScript SDK for Anva \u2014 live AI avatars for your product.",
   "keywords": [
@@ -12,7 +12,7 @@
   "homepage": "https://anva.ai",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/C-L-2013/anva-sdk.git",
+    "url": "git+https://github.com/Anva-avatars/anva-sdk.git",
     "directory": "js"
   },
   "license": "MIT",

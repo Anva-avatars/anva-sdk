@@ -7,8 +7,8 @@ it from your own stack.
 | Language | Install | Docs |
 |---|---|---|
 | Python | `pip install anva` | [python/](python/) |
-| JavaScript / TypeScript | `npm install anva` | [js/](js/) |
-| Go | `go get github.com/C-L-2013/anva-sdk/go` | [go/](go/) |
+| JavaScript / TypeScript | `npm install anva-sdk` | [js/](js/) |
+| Go | `go get github.com/Anva-avatars/anva-sdk/go` | [go/](go/) |
 
 All three are thin, dependency-free clients over the same REST API
 (`https://anva.ai/api/v1`), authenticated with an API key from your
@@ -30,7 +30,7 @@ for event in client.events(session["session_id"]):   # pip install anva[ws]
 ```
 
 ```js
-import { Anva } from "anva";
+import { Anva } from "anva-sdk";
 
 const client = new Anva(process.env.ANVA_KEY);
 const session = await client.createSession({ characterId: "char_..." });

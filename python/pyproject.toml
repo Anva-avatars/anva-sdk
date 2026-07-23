@@ -25,7 +25,7 @@ ws = ["websockets>=12"]
 [project.urls]
 Homepage = "https://anva.ai"
 Documentation = "https://anva.ai/docs"
-Source = "https://github.com/C-L-2013/anva-sdk"
+Source = "https://github.com/Anva-avatars/anva-sdk"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/anva"]

@@ -4,11 +4,11 @@ Official Go SDK for [Anva](https://anva.ai) — live AI avatars.
 Standard library only.
 
 ```bash
-go get github.com/C-L-2013/anva-sdk/go
+go get github.com/Anva-avatars/anva-sdk/go
 ```
 
 ```go
-import anva "github.com/C-L-2013/anva-sdk/go"
+import anva "github.com/Anva-avatars/anva-sdk/go"
 
 client := anva.New(os.Getenv("ANVA_KEY"))
 

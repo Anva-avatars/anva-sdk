@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "anva"
+version = "0.1.0"
+description = "Official Python SDK for Anva — live AI avatars for your product."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+authors = [{ name = "Anva", email = "anva.ai.2026@gmail.com" }]
+keywords = ["avatar", "ai", "webrtc", "voice", "anva"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Libraries",
+]
+
+[project.optional-dependencies]
+ws = ["websockets>=12"]
+
+[project.urls]
+Homepage = "https://anva.ai"
+Documentation = "https://anva.ai/docs"
+Source = "https://github.com/C-L-2013/anva-sdk"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/anva"]

@@ -1,0 +1,38 @@
+{
+  "name": "anva",
+  "version": "0.1.0",
+  "description": "Official JavaScript/TypeScript SDK for Anva \u2014 live AI avatars for your product.",
+  "keywords": [
+    "avatar",
+    "ai",
+    "webrtc",
+    "voice",
+    "anva"
+  ],
+  "homepage": "https://anva.ai",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/C-L-2013/anva-sdk.git",
+    "directory": "js"
+  },
+  "license": "MIT",
+  "author": "Anva <anva.ai.2026@gmail.com>",
+  "type": "module",
+  "module": "./index.js",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./index.js",
+      "default": "./index.js"
+    }
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}

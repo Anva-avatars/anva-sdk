@@ -5,10 +5,22 @@ export interface AnvaOptions {
   baseUrl?: string;
 }
 
+/**
+ * Parameters for `createSession`. Provide **either** `presetId` (embed tier —
+ * a persona saved in the Playground) **or** `avatarId` plus the inline persona
+ * fields (advanced tier — nothing is stored server-side). At least one of
+ * `presetId` / `avatarId` is required.
+ */
 export interface CreateSessionParams {
-  characterId: string;
+  /** Embed tier: a saved preset id. */
+  presetId?: string;
+  /** Advanced tier: the avatar to drive with an inline persona. */
+  avatarId?: string;
+  systemPrompt?: string;
+  voiceId?: string;
+  languageCode?: string;
   /** Omit for the built-in conversation engine, or "external" to drive the LLM yourself. */
-  llmMode?: "external";
+  llmMode?: string;
   webhookUrl?: string;
   webhookSecret?: string;
 }
@@ -16,7 +28,9 @@ export interface CreateSessionParams {
 export interface Session {
   session_id: string;
   session_token: string;
-  character_id: string;
+  instance_id: string;
+  preset_id?: string;
+  avatar_id?: string;
   llm_mode?: string;
   expires_at: string;
   /** Ready to drop into an <iframe allow="camera; microphone; autoplay">. */
@@ -25,7 +39,7 @@ export interface Session {
   [key: string]: unknown;
 }
 
-export interface Character {
+export interface Preset {
   id: string;
   name: string;
   visual_character_id: string;
@@ -34,6 +48,16 @@ export interface Character {
   language_code?: string;
   disabled: boolean;
   active: boolean;
+  barge_in?: boolean;
+  proactive_questions?: boolean;
+  greeting_enabled?: boolean;
+  greeting_text?: string;
+  [key: string]: unknown;
+}
+
+/** A per-key usage bucket. */
+export interface Instance {
+  id: string;
   [key: string]: unknown;
 }
 
@@ -66,16 +90,18 @@ export declare class Anva {
   eventsUrl(sessionId: string): string;
   events(sessionId: string, opts?: EventsOptions): AsyncGenerator<SessionEvent, void, void>;
 
-  listCharacters(): Promise<{ characters: Character[] }>;
-  createCharacter(params: {
+  listPresets(): Promise<{ presets: Preset[] }>;
+  createPreset(params: {
     name: string;
     visualCharacterId?: string;
     systemPrompt?: string;
     voiceId?: string;
     languageCode?: string;
-  }): Promise<Character>;
-  getCharacter(characterId: string): Promise<Character>;
-  deleteCharacter(characterId: string): Promise<{ id: string; status: string }>;
+  }): Promise<Preset>;
+  getPreset(presetId: string): Promise<Preset>;
+  deletePreset(presetId: string): Promise<{ id: string; status: string }>;
+
+  listInstances(): Promise<{ instances: Instance[] }>;
 }
 
 export default Anva;

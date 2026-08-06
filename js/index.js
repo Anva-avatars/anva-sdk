@@ -3,7 +3,7 @@
  *
  *   import { Anva } from "anva";
  *   const client = new Anva(process.env.ANVA_KEY);
- *   const session = await client.createSession({ characterId: "char_..." });
+ *   const session = await client.createSession({ presetId: "..." });
  *   // put session.embed_url in an <iframe allow="camera; microphone; autoplay">
  *
  * Works in Node 18+ (global fetch/WebSocket) and modern browsers — but keep
@@ -36,43 +36,60 @@ export class Anva {
   // -- sessions -------------------------------------------------------------
 
   /**
-   * Create a live session. Returns { session_id, session_token, embed_url,
-   * events_ws_url, expires_at, ... }.
+   * Create a live session, one of two ways:
+   *  - Embed tier: pass `presetId` (a saved preset from the Playground).
+   *  - Advanced tier: pass `avatarId` + the persona (`systemPrompt`, `voiceId`,
+   *    `languageCode`) directly — nothing is stored server-side.
+   * Returns { session_id, session_token, embed_url, events_ws_url, expires_at,
+   * instance_id, preset_id, avatar_id, ... }.
+   *
+   * @param {{presetId?: string, avatarId?: string, systemPrompt?: string,
+   *   voiceId?: string, languageCode?: string, llmMode?: string,
+   *   webhookUrl?: string, webhookSecret?: string}} params
    */
-  createSession({ characterId, llmMode, webhookUrl, webhookSecret }) {
-    const body = { character_id: characterId };
+  createSession(params = {}) {
+    const { presetId, avatarId, systemPrompt, voiceId, languageCode, llmMode, webhookUrl, webhookSecret } = params;
+    if (!presetId && !avatarId) {
+      throw new Error("createSession requires either presetId (embed) or avatarId (advanced persona)");
+    }
+    const body = {};
+    if (presetId) body.preset_id = presetId;
+    if (avatarId) body.avatar_id = avatarId;
+    if (systemPrompt) body.system_prompt = systemPrompt;
+    if (voiceId) body.voice_id = voiceId;
+    if (languageCode) body.language_code = languageCode;
     if (llmMode) body.llm_mode = llmMode;
     if (webhookUrl) body.webhook_url = webhookUrl;
     if (webhookSecret) body.webhook_secret = webhookSecret;
-    return this._request("POST", "/api/v1/sessions", body);
+    return this._request("POST", "/api/v2/sessions", body);
   }
 
   getSession(sessionId) {
-    return this._request("GET", `/api/v1/sessions/${enc(sessionId)}`);
+    return this._request("GET", `/api/v2/sessions/${enc(sessionId)}`);
   }
 
   endSession(sessionId) {
-    return this._request("DELETE", `/api/v1/sessions/${enc(sessionId)}`);
+    return this._request("DELETE", `/api/v2/sessions/${enc(sessionId)}`);
   }
 
   /** Have the avatar speak `text` to the user. */
   sendMessage(sessionId, text) {
-    return this._request("POST", `/api/v1/sessions/${enc(sessionId)}/messages`, { text });
+    return this._request("POST", `/api/v2/sessions/${enc(sessionId)}/messages`, { text });
   }
 
   /** Stop the avatar mid-sentence. */
   interrupt(sessionId) {
-    return this._request("POST", `/api/v1/sessions/${enc(sessionId)}/interrupt`, {});
+    return this._request("POST", `/api/v2/sessions/${enc(sessionId)}/interrupt`, {});
   }
 
   triggerAction(sessionId, name) {
-    return this._request("POST", `/api/v1/sessions/${enc(sessionId)}/actions`, { name });
+    return this._request("POST", `/api/v2/sessions/${enc(sessionId)}/actions`, { name });
   }
 
   /** The authenticated WebSocket URL for the session's event stream. */
   eventsUrl(sessionId) {
     const ws = this.baseUrl.replace(/^http/, "ws");
-    return `${ws}/api/v1/sessions/${enc(sessionId)}/events?api_key=${encodeURIComponent(this.apiKey)}`;
+    return `${ws}/api/v2/sessions/${enc(sessionId)}/events?api_key=${encodeURIComponent(this.apiKey)}`;
   }
 
   /**
@@ -124,27 +141,33 @@ export class Anva {
     }
   }
 
-  // -- characters -----------------------------------------------------------
+  // -- presets --------------------------------------------------------------
 
-  listCharacters() {
-    return this._request("GET", "/api/v1/characters");
+  listPresets() {
+    return this._request("GET", "/api/v2/presets");
   }
 
-  createCharacter({ name, visualCharacterId, systemPrompt, voiceId, languageCode }) {
+  createPreset({ name, visualCharacterId, systemPrompt, voiceId, languageCode }) {
     const body = { name };
     if (visualCharacterId) body.visual_character_id = visualCharacterId;
     if (systemPrompt) body.system_prompt = systemPrompt;
     if (voiceId) body.voice_id = voiceId;
     if (languageCode) body.language_code = languageCode;
-    return this._request("POST", "/api/v1/characters", body);
+    return this._request("POST", "/api/v2/presets", body);
   }
 
-  getCharacter(characterId) {
-    return this._request("GET", `/api/v1/characters/${enc(characterId)}`);
+  getPreset(presetId) {
+    return this._request("GET", `/api/v2/presets/${enc(presetId)}`);
   }
 
-  deleteCharacter(characterId) {
-    return this._request("DELETE", `/api/v1/characters/${enc(characterId)}`);
+  deletePreset(presetId) {
+    return this._request("DELETE", `/api/v2/presets/${enc(presetId)}`);
+  }
+
+  // -- instances ------------------------------------------------------------
+
+  listInstances() {
+    return this._request("GET", "/api/v2/instances");
   }
 
   // -- plumbing -------------------------------------------------------------
@@ -155,7 +178,7 @@ export class Anva {
       headers: {
         Authorization: `Bearer ${this.apiKey}`,
         "Content-Type": "application/json",
-        "User-Agent": "anva-js/0.1.0",
+        "User-Agent": "anva-js/0.2.0",
       },
       body: body === undefined ? undefined : JSON.stringify(body),
     });

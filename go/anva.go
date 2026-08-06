@@ -3,7 +3,7 @@
 //
 //	client := anva.New(os.Getenv("ANVA_KEY"))
 //	session, err := client.CreateSession(ctx, anva.CreateSessionParams{
-//		CharacterID: "char_...",
+//		PresetID: "...",
 //	})
 //	// put session.EmbedURL in an <iframe allow="camera; microphone; autoplay">
 //
@@ -52,9 +52,14 @@ func (e *Error) Error() string {
 	return fmt.Sprintf("%s: %s (HTTP %d)", e.Code, e.Message, e.Status)
 }
 
-// CreateSessionParams configures a new live session.
+// CreateSessionParams configures a new live session. Provide PresetID (embed
+// tier) OR AvatarID plus the persona fields (advanced tier, nothing stored).
 type CreateSessionParams struct {
-	CharacterID   string `json:"character_id"`
+	PresetID      string `json:"preset_id,omitempty"`
+	AvatarID      string `json:"avatar_id,omitempty"`
+	SystemPrompt  string `json:"system_prompt,omitempty"`
+	VoiceID       string `json:"voice_id,omitempty"`
+	LanguageCode  string `json:"language_code,omitempty"`
 	LLMMode       string `json:"llm_mode,omitempty"`
 	WebhookURL    string `json:"webhook_url,omitempty"`
 	WebhookSecret string `json:"webhook_secret,omitempty"`
@@ -64,15 +69,17 @@ type CreateSessionParams struct {
 type Session struct {
 	SessionID    string `json:"session_id"`
 	SessionToken string `json:"session_token"`
-	CharacterID  string `json:"character_id"`
+	InstanceID   string `json:"instance_id"`
+	PresetID     string `json:"preset_id"`
+	AvatarID     string `json:"avatar_id"`
 	LLMMode      string `json:"llm_mode"`
 	ExpiresAt    string `json:"expires_at"`
 	EmbedURL     string `json:"embed_url"`
 	EventsWSURL  string `json:"events_ws_url"`
 }
 
-// Character mirrors the public character resource.
-type Character struct {
+// Preset mirrors the public preset resource.
+type Preset struct {
 	ID                 string `json:"id"`
 	Name               string `json:"name"`
 	VisualCharacterID  string `json:"visual_character_id"`
@@ -87,8 +94,8 @@ type Character struct {
 	GreetingText       string `json:"greeting_text"`
 }
 
-// CreateCharacterParams configures a new character.
-type CreateCharacterParams struct {
+// CreatePresetParams configures a new preset.
+type CreatePresetParams struct {
 	Name              string `json:"name"`
 	VisualCharacterID string `json:"visual_character_id,omitempty"`
 	SystemPrompt      string `json:"system_prompt,omitempty"`
@@ -100,68 +107,68 @@ type CreateCharacterParams struct {
 
 func (c *Client) CreateSession(ctx context.Context, p CreateSessionParams) (*Session, error) {
 	var out Session
-	err := c.do(ctx, http.MethodPost, "/api/v1/sessions", p, &out)
+	err := c.do(ctx, http.MethodPost, "/api/v2/sessions", p, &out)
 	return &out, err
 }
 
 func (c *Client) GetSession(ctx context.Context, sessionID string) (map[string]any, error) {
 	var out map[string]any
-	err := c.do(ctx, http.MethodGet, "/api/v1/sessions/"+esc(sessionID), nil, &out)
+	err := c.do(ctx, http.MethodGet, "/api/v2/sessions/"+esc(sessionID), nil, &out)
 	return out, err
 }
 
 func (c *Client) EndSession(ctx context.Context, sessionID string) error {
-	return c.do(ctx, http.MethodDelete, "/api/v1/sessions/"+esc(sessionID), nil, nil)
+	return c.do(ctx, http.MethodDelete, "/api/v2/sessions/"+esc(sessionID), nil, nil)
 }
 
 // SendMessage has the avatar speak text to the user.
 func (c *Client) SendMessage(ctx context.Context, sessionID, text string) error {
 	body := map[string]string{"text": text}
-	return c.do(ctx, http.MethodPost, "/api/v1/sessions/"+esc(sessionID)+"/messages", body, nil)
+	return c.do(ctx, http.MethodPost, "/api/v2/sessions/"+esc(sessionID)+"/messages", body, nil)
 }
 
 // Interrupt stops the avatar mid-sentence.
 func (c *Client) Interrupt(ctx context.Context, sessionID string) error {
-	return c.do(ctx, http.MethodPost, "/api/v1/sessions/"+esc(sessionID)+"/interrupt", struct{}{}, nil)
+	return c.do(ctx, http.MethodPost, "/api/v2/sessions/"+esc(sessionID)+"/interrupt", struct{}{}, nil)
 }
 
 func (c *Client) TriggerAction(ctx context.Context, sessionID, name string) error {
 	body := map[string]string{"name": name}
-	return c.do(ctx, http.MethodPost, "/api/v1/sessions/"+esc(sessionID)+"/actions", body, nil)
+	return c.do(ctx, http.MethodPost, "/api/v2/sessions/"+esc(sessionID)+"/actions", body, nil)
 }
 
 // EventsURL is the authenticated WebSocket URL for the session's live event
 // stream (transcripts, state changes). Connect with any WebSocket client.
 func (c *Client) EventsURL(sessionID string) string {
 	base := strings.Replace(c.BaseURL, "http", "ws", 1)
-	return base + "/api/v1/sessions/" + esc(sessionID) + "/events?api_key=" +
+	return base + "/api/v2/sessions/" + esc(sessionID) + "/events?api_key=" +
 		url.QueryEscape(c.APIKey)
 }
 
-// -- characters -------------------------------------------------------------
+// -- presets ----------------------------------------------------------------
 
-func (c *Client) ListCharacters(ctx context.Context) ([]Character, error) {
+func (c *Client) ListPresets(ctx context.Context) ([]Preset, error) {
 	var out struct {
-		Characters []Character `json:"characters"`
+		Presets []Preset `json:"presets"`
 	}
-	err := c.do(ctx, http.MethodGet, "/api/v1/characters", nil, &out)
-	return out.Characters, err
+	err := c.do(ctx, http.MethodGet, "/api/v2/presets", nil, &out)
+	return out.Presets, err
 }
 
-func (c *Client) CreateCharacter(ctx context.Context, p CreateCharacterParams) (*Character, error) {
-	var out Character
-	err := c.do(ctx, http.MethodPost, "/api/v1/characters", p, &out)
+func (c *Client) CreatePreset(ctx context.Context, p CreatePresetParams) (*Preset, error) {
+	var out Preset
+	err := c.do(ctx, http.MethodPost, "/api/v2/presets", p, &out)
 	return &out, err
 }
 
-func (c *Client) GetCharacter(ctx context.Context, characterID string) (*Character, error) {
-	var out Character
-	err := c.do(ctx, http.MethodGet, "/api/v1/characters/"+esc(characterID), nil, &out)
+func (c *Client) GetPreset(ctx context.Context, presetID string) (*Preset, error) {
+	var out Preset
+	err := c.do(ctx, http.MethodGet, "/api/v2/presets/"+esc(presetID), nil, &out)
 	return &out, err
 }
 
-func (c *Client) DeleteCharacter(ctx context.Context, characterID string) error {
-	return c.do(ctx, http.MethodDelete, "/api/v1/characters/"+esc(characterID), nil, nil)
+func (c *Client) DeletePreset(ctx context.Context, presetID string) error {
+	return c.do(ctx, http.MethodDelete, "/api/v2/presets/"+esc(presetID), nil, nil)
 }
 
 // -- plumbing ---------------------------------------------------------------
@@ -181,7 +188,7 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.APIKey)
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "anva-go/0.1.0")
+	req.Header.Set("User-Agent", "anva-go/0.2.0")
 	httpc := c.HTTPClient
 	if httpc == nil {
 		httpc = http.DefaultClient

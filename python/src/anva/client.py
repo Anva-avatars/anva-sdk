@@ -44,46 +44,70 @@ class Anva:
 
     # -- sessions -----------------------------------------------------------
 
-    def create_session(self, character_id: str, *, llm_mode: Optional[str] = None,
+    def create_session(self, preset_id: Optional[str] = None, *,
+                       avatar_id: Optional[str] = None,
+                       system_prompt: Optional[str] = None,
+                       voice_id: Optional[str] = None,
+                       language_code: Optional[str] = None,
+                       llm_mode: Optional[str] = None,
                        webhook_url: Optional[str] = None,
                        webhook_secret: Optional[str] = None) -> Dict[str, Any]:
-        """Create a live session. Returns session_id, session_token,
-        embed_url (iframe-ready) and events_ws_url."""
-        body: Dict[str, Any] = {"character_id": character_id}
+        """Create a live session, one of two ways:
+
+        - Embed tier: pass ``preset_id`` (a saved preset from the Playground).
+        - Advanced tier: pass ``avatar_id`` plus the persona (``system_prompt``,
+          ``voice_id``, ``language_code``) directly — nothing is stored.
+
+        Returns session_id, session_token, embed_url (iframe-ready),
+        events_ws_url, instance_id, preset_id, avatar_id.
+        """
+        if not preset_id and not avatar_id:
+            raise ValueError("create_session requires either preset_id (embed) or avatar_id (advanced persona)")
+        body: Dict[str, Any] = {}
+        if preset_id:
+            body["preset_id"] = preset_id
+        if avatar_id:
+            body["avatar_id"] = avatar_id
+        if system_prompt:
+            body["system_prompt"] = system_prompt
+        if voice_id:
+            body["voice_id"] = voice_id
+        if language_code:
+            body["language_code"] = language_code
         if llm_mode:
             body["llm_mode"] = llm_mode
         if webhook_url:
             body["webhook_url"] = webhook_url
         if webhook_secret:
             body["webhook_secret"] = webhook_secret
-        return self._request("POST", "/api/v1/sessions", body)
+        return self._request("POST", "/api/v2/sessions", body)
 
     def get_session(self, session_id: str) -> Dict[str, Any]:
-        return self._request("GET", f"/api/v1/sessions/{_esc(session_id)}")
+        return self._request("GET", f"/api/v2/sessions/{_esc(session_id)}")
 
     def end_session(self, session_id: str) -> Dict[str, Any]:
-        return self._request("DELETE", f"/api/v1/sessions/{_esc(session_id)}")
+        return self._request("DELETE", f"/api/v2/sessions/{_esc(session_id)}")
 
     def send_message(self, session_id: str, text: str) -> Dict[str, Any]:
         """Have the avatar speak `text` to the user."""
         return self._request(
-            "POST", f"/api/v1/sessions/{_esc(session_id)}/messages",
+            "POST", f"/api/v2/sessions/{_esc(session_id)}/messages",
             {"text": text})
 
     def interrupt(self, session_id: str) -> Dict[str, Any]:
         """Stop the avatar mid-sentence."""
         return self._request(
-            "POST", f"/api/v1/sessions/{_esc(session_id)}/interrupt", {})
+            "POST", f"/api/v2/sessions/{_esc(session_id)}/interrupt", {})
 
     def trigger_action(self, session_id: str, name: str) -> Dict[str, Any]:
         return self._request(
-            "POST", f"/api/v1/sessions/{_esc(session_id)}/actions",
+            "POST", f"/api/v2/sessions/{_esc(session_id)}/actions",
             {"name": name})
 
     def events_url(self, session_id: str) -> str:
         """The authenticated WebSocket URL for the session's event stream."""
         ws_base = self.base_url.replace("http", "ws", 1)
-        return (f"{ws_base}/api/v1/sessions/{_esc(session_id)}/events"
+        return (f"{ws_base}/api/v2/sessions/{_esc(session_id)}/events"
                 f"?api_key={urllib.parse.quote(self.api_key)}")
 
     def events(self, session_id: str) -> Iterator[Dict[str, Any]]:
@@ -104,16 +128,16 @@ class Anva:
                 except (TypeError, ValueError):
                     continue
 
-    # -- characters ---------------------------------------------------------
+    # -- presets ------------------------------------------------------------
 
-    def list_characters(self) -> Dict[str, Any]:
-        return self._request("GET", "/api/v1/characters")
+    def list_presets(self) -> Dict[str, Any]:
+        return self._request("GET", "/api/v2/presets")
 
-    def create_character(self, name: str, *,
-                         visual_character_id: Optional[str] = None,
-                         system_prompt: Optional[str] = None,
-                         voice_id: Optional[str] = None,
-                         language_code: Optional[str] = None) -> Dict[str, Any]:
+    def create_preset(self, name: str, *,
+                      visual_character_id: Optional[str] = None,
+                      system_prompt: Optional[str] = None,
+                      voice_id: Optional[str] = None,
+                      language_code: Optional[str] = None) -> Dict[str, Any]:
         body: Dict[str, Any] = {"name": name}
         if visual_character_id:
             body["visual_character_id"] = visual_character_id
@@ -123,13 +147,18 @@ class Anva:
             body["voice_id"] = voice_id
         if language_code:
             body["language_code"] = language_code
-        return self._request("POST", "/api/v1/characters", body)
+        return self._request("POST", "/api/v2/presets", body)
 
-    def get_character(self, character_id: str) -> Dict[str, Any]:
-        return self._request("GET", f"/api/v1/characters/{_esc(character_id)}")
+    def get_preset(self, preset_id: str) -> Dict[str, Any]:
+        return self._request("GET", f"/api/v2/presets/{_esc(preset_id)}")
 
-    def delete_character(self, character_id: str) -> Dict[str, Any]:
-        return self._request("DELETE", f"/api/v1/characters/{_esc(character_id)}")
+    def delete_preset(self, preset_id: str) -> Dict[str, Any]:
+        return self._request("DELETE", f"/api/v2/presets/{_esc(preset_id)}")
+
+    # -- instances ----------------------------------------------------------
+
+    def list_instances(self) -> Dict[str, Any]:
+        return self._request("GET", "/api/v2/instances")
 
     # -- plumbing -----------------------------------------------------------
 
@@ -141,7 +170,7 @@ class Anva:
             headers={
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",
-                "User-Agent": "anva-python/0.1.0",
+                "User-Agent": "anva-python/0.2.0",
             })
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:

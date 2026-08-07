@@ -89,7 +89,9 @@ class Anva:
         return self._request("DELETE", f"/api/v2/sessions/{_esc(session_id)}")
 
     def send_message(self, session_id: str, text: str) -> Dict[str, Any]:
-        """Have the avatar speak `text` to the user."""
+        """Send ``text`` as a user message; the avatar hears it and replies (it
+        does NOT speak ``text`` verbatim). Verbatim speech needs
+        ``llm_mode="external"`` plus the events-WS ``say`` command."""
         return self._request(
             "POST", f"/api/v2/sessions/{_esc(session_id)}/messages",
             {"text": text})

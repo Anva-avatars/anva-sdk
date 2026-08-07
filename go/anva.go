@@ -121,7 +121,9 @@ func (c *Client) EndSession(ctx context.Context, sessionID string) error {
 	return c.do(ctx, http.MethodDelete, "/api/v2/sessions/"+esc(sessionID), nil, nil)
 }
 
-// SendMessage has the avatar speak text to the user.
+// SendMessage sends text as a user message; the avatar hears it and replies
+// (it does NOT speak text verbatim). Verbatim speech needs llm_mode "external"
+// plus the events-WS "say" command.
 func (c *Client) SendMessage(ctx context.Context, sessionID, text string) error {
 	body := map[string]string{"text": text}
 	return c.do(ctx, http.MethodPost, "/api/v2/sessions/"+esc(sessionID)+"/messages", body, nil)

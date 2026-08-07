@@ -72,7 +72,9 @@ export class Anva {
     return this._request("DELETE", `/api/v2/sessions/${enc(sessionId)}`);
   }
 
-  /** Have the avatar speak `text` to the user. */
+  /** Send `text` as a user message; the avatar hears it and replies (it does
+   * NOT speak `text` verbatim). Verbatim speech needs llm_mode:"external" + the
+   * events-WS `say` command. */
   sendMessage(sessionId, text) {
     return this._request("POST", `/api/v2/sessions/${enc(sessionId)}/messages`, { text });
   }

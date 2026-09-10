@@ -1,41 +1,40 @@
-# anva — Go SDK
+# Anva Go SDK
 
-Official Go SDK for [Anva](https://anva.ai) — live AI avatars.
-Standard library only.
-
-```bash
-go get github.com/Anva-avatars/anva-sdk/go
-```
+Standard-library REST client and a bidirectional wrapper for your chosen
+WebSocket library. Install with
+`go get github.com/Anva-avatars/anva-sdk/go@v0.3.0`.
 
 ```go
-import anva "github.com/Anva-avatars/anva-sdk/go"
+import (
+    "context"
+    "os"
+    anva "github.com/Anva-avatars/anva-sdk/go"
+)
 
 client := anva.New(os.Getenv("ANVA_KEY"))
-
-// Embed tier: start from a preset saved in the Playground.
-session, err := client.CreateSession(ctx, anva.CreateSessionParams{
-    PresetID: "preset_...",
+session, err := client.CreateSession(context.Background(), anva.CreateSessionParams{
+    PresetID: "YOUR_PRESET_ID", ServiceMode: anva.AnvaLight,
 })
-// session.EmbedURL → your frontend
-
-_ = client.SendMessage(ctx, session.SessionID, "Welcome!")
-
-presets, _ := client.ListPresets(ctx)
-
-// live events: connect any WebSocket client to
-// client.EventsURL(session.SessionID)
+if err != nil { panic(err) }
+// Attach session.EmbedURL in your frontend.
 ```
 
-Advanced tier — skip presets and pass an avatar plus an inline persona
-(nothing is stored server-side):
+`Capabilities` and `Billing` return decoded maps. Service modes are `AvatarOnly`,
+`BYOLLM`, `AnvaLight`, `AnvaExpressive`, and `ElevenAgentsMax`. The server resolves
+availability, conflicts and billing. `LLMMode` remains a deprecated alias.
 
-```go
-session, err := client.CreateSession(ctx, anva.CreateSessionParams{
-    AvatarID:     "avatar_...",
-    SystemPrompt: "You are a friendly guide.",
-    VoiceID:      "voice_...",
-    LanguageCode: "en-US",
-})
-```
+Connect a WebSocket to `client.EventsURL(session.SessionID)` on your backend,
+then use `stream := anva.NewRealtime(socket)`. The socket implements `ReadJSON`,
+`WriteJSON`, `Close`. `stream.Receive()` reads an envelope; `TurnDelta`, `TurnDone`,
+`TurnCancel`, `Interrupt`, `UpdateContext`, `StartPresentation`, and speech methods
+send commands on the same socket. Writers are serialized; use one event reader.
 
-Errors are `*anva.Error` with `Status`, `Code`, `Message`. MIT © Penguin Robotics
+Speech uses `StartSpeech(turnID, text)`,
+`AppendSpeech(turnID, seq, startSample, pcmBytes)`,
+`FinishSpeech(turnID, totalSamples)` and `CancelSpeech(turnID)`. Text may be empty.
+Raw PCM must be signed16 little-endian, 24kHz mono. Chunks are at most 24,000 bytes;
+observe `speech.state` and bound unplayed audio to five seconds. Closing the
+control socket does not end a session; call `EndSession` when finished.
+
+Errors are `*anva.Error` with `Status`, `Code`, `Message`. Never log the
+API-key-bearing events URL. See the repository README for protocol details.

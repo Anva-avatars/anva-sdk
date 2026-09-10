@@ -1,6 +1,6 @@
 {
   "name": "anva-sdk",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Official JavaScript/TypeScript SDK for Anva \u2014 live AI avatars for your product.",
   "keywords": [
     "avatar",
@@ -30,9 +30,13 @@
   "files": [
     "index.js",
     "index.d.ts",
-    "README.md"
+    "README.md",
+    "realtime.js"
   ],
   "engines": {
     "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js"
   }
 }

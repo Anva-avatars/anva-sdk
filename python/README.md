@@ -1,42 +1,34 @@
 # anva — Python SDK
 
-Official Python SDK for [Anva](https://anva.ai) — live AI avatars.
-
-```bash
-pip install anva          # REST client, zero dependencies
-pip install "anva[ws]"    # + live event stream (WebSocket)
-```
+Install with `pip install "anva[ws]==0.3.0"`.
+The REST client uses the standard library. Realtime uses `websockets`' sync API.
 
 ```python
-from anva import Anva
-
-client = Anva("anva_key_...")
-
-# Embed tier: start from a preset saved in the Playground.
-session = client.create_session(preset_id="preset_...")
-print(session["embed_url"])
-
-client.send_message(session["session_id"], "Welcome!")
-client.interrupt(session["session_id"])
-
-for event in client.events(session["session_id"]):
-    print(event)
-
-presets = client.list_presets()
-instances = client.list_instances()
-```
-
-Advanced tier — skip presets and pass an avatar plus an inline persona
-(nothing is stored server-side):
-
-```python
+import os
+from anva import Anva, AnvaError
+client = Anva(os.environ["ANVA_KEY"])
+capabilities = client.capabilities()
 session = client.create_session(
-    avatar_id="avatar_...",
-    system_prompt="You are a friendly guide.",
-    voice_id="voice_...",
-    language_code="en-US",
-)
+    preset_id="YOUR_PRESET_ID", service_mode="byo_llm")
+# Attach session["embed_url"] in your browser.
+try:
+    with client.connect(session["session_id"]) as stream:
+        for event in stream:
+            if event["type"] == "turn.request":
+                turn_id = event["payload"]["turn_id"]
+                # Replace the immediate sample with your cancellable LLM worker.
+                stream.turn_delta(turn_id, "Hello from your application.")
+                stream.turn_done(turn_id)
+finally:
+    client.end_session(session["session_id"])
 ```
 
-Errors raise `anva.AnvaError` with `.status`, `.code` and `.message`.
-MIT © Penguin Robotics
+Use one reader per connection; perform slow LLM work in a separate cancellable
+worker so it can react to `turn.cancel`. `send_message` is user input, not
+verbatim assistant speech. `AnvaError` includes `status`, `code`, `message`,
+and `details`. Realtime command failures remain structured events.
+
+All five service modes are supported as request values, subject to deployment
+capabilities. PCM methods accept `bytes`, `bytearray` or byte-oriented `memoryview`:
+24kHz signed16 little-endian mono, maximum 24,000 bytes per chunk. Read the
+repository README for sample offsets, backpressure and real playback requirements.

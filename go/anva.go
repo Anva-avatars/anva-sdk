@@ -23,6 +23,16 @@ import (
 	"time"
 )
 
+type ServiceMode string
+
+const (
+	AvatarOnly      ServiceMode = "avatar_only"
+	BYOLLM          ServiceMode = "byo_llm"
+	AnvaLight       ServiceMode = "anva_light"
+	AnvaExpressive  ServiceMode = "anva_expressive"
+	ElevenAgentsMax ServiceMode = "elevenagents_max"
+)
+
 const DefaultBaseURL = "https://anva.ai"
 
 // Client talks to the Anva REST API. Safe for concurrent use.
@@ -55,34 +65,43 @@ func (e *Error) Error() string {
 // CreateSessionParams configures a new live session. Provide PresetID (embed
 // tier) OR AvatarID plus the persona fields (advanced tier, nothing stored).
 type CreateSessionParams struct {
-	PresetID      string `json:"preset_id,omitempty"`
-	AvatarID      string `json:"avatar_id,omitempty"`
-	SystemPrompt  string `json:"system_prompt,omitempty"`
-	VoiceID       string `json:"voice_id,omitempty"`
-	LanguageCode  string `json:"language_code,omitempty"`
-	LLMMode       string `json:"llm_mode,omitempty"`
-	WebhookURL    string `json:"webhook_url,omitempty"`
-	WebhookSecret string `json:"webhook_secret,omitempty"`
+	PresetID             string         `json:"preset_id,omitempty"`
+	AvatarID             string         `json:"avatar_id,omitempty"`
+	SystemPrompt         string         `json:"system_prompt,omitempty"`
+	VoiceID              string         `json:"voice_id,omitempty"`
+	LanguageCode         string         `json:"language_code,omitempty"`
+	ServiceMode          ServiceMode    `json:"service_mode,omitempty"`
+	LLMMode              string         `json:"llm_mode,omitempty"` // Deprecated compatibility alias.
+	PerformanceOptions   map[string]any `json:"performance_options,omitempty"`
+	ConversationProvider string         `json:"conversation_provider,omitempty"`
+	PerformanceMode      string         `json:"performance_mode,omitempty"`
+	ElevenLabsAgentID    string         `json:"elevenlabs_agent_id,omitempty"`
+	DynamicExpressions   *bool          `json:"dynamic_expressions,omitempty"`
+	WebhookURL           string         `json:"webhook_url,omitempty"`
+	WebhookSecret        string         `json:"webhook_secret,omitempty"`
 }
 
 // Session is the create-session response.
 type Session struct {
-	SessionID    string `json:"session_id"`
-	SessionToken string `json:"session_token"`
-	InstanceID   string `json:"instance_id"`
-	PresetID     string `json:"preset_id"`
-	AvatarID     string `json:"avatar_id"`
-	LLMMode      string `json:"llm_mode"`
-	ExpiresAt    string `json:"expires_at"`
-	EmbedURL     string `json:"embed_url"`
-	EventsWSURL  string `json:"events_ws_url"`
+	SessionID    string         `json:"session_id"`
+	SessionToken string         `json:"session_token"`
+	InstanceID   string         `json:"instance_id"`
+	PresetID     string         `json:"preset_id"`
+	AvatarID     string         `json:"avatar_id"`
+	LLMMode      string         `json:"llm_mode"`
+	ServiceMode  ServiceMode    `json:"service_mode"`
+	Billing      map[string]any `json:"billing"`
+	ExpiresAt    string         `json:"expires_at"`
+	EmbedURL     string         `json:"embed_url"`
+	EventsWSURL  string         `json:"events_ws_url"`
 }
 
 // Preset mirrors the public preset resource.
 type Preset struct {
 	ID                 string `json:"id"`
 	Name               string `json:"name"`
-	VisualCharacterID  string `json:"visual_character_id"`
+	AvatarID           string `json:"avatar_id"`
+	VisualCharacterID  string `json:"visual_character_id"` // Deprecated alias.
 	SystemPrompt       string `json:"system_prompt"`
 	VoiceID            string `json:"voice_id"`
 	LanguageCode       string `json:"language_code"`
@@ -97,7 +116,8 @@ type Preset struct {
 // CreatePresetParams configures a new preset.
 type CreatePresetParams struct {
 	Name              string `json:"name"`
-	VisualCharacterID string `json:"visual_character_id,omitempty"`
+	AvatarID          string `json:"avatar_id,omitempty"`
+	VisualCharacterID string `json:"visual_character_id,omitempty"` // Deprecated alias.
 	SystemPrompt      string `json:"system_prompt,omitempty"`
 	VoiceID           string `json:"voice_id,omitempty"`
 	LanguageCode      string `json:"language_code,omitempty"`
@@ -106,6 +126,9 @@ type CreatePresetParams struct {
 // -- sessions ---------------------------------------------------------------
 
 func (c *Client) CreateSession(ctx context.Context, p CreateSessionParams) (*Session, error) {
+	if (p.PresetID == "") == (p.AvatarID == "") {
+		return nil, fmt.Errorf("provide exactly one of PresetID or AvatarID")
+	}
 	var out Session
 	err := c.do(ctx, http.MethodPost, "/api/v2/sessions", p, &out)
 	return &out, err
@@ -122,8 +145,8 @@ func (c *Client) EndSession(ctx context.Context, sessionID string) error {
 }
 
 // SendMessage sends text as a user message; the avatar hears it and replies
-// (it does NOT speak text verbatim). Verbatim speech needs llm_mode "external"
-// plus the events-WS "say" command.
+// (it does NOT speak text verbatim). External replies use BYOLLM and
+// Realtime.TurnDelta / TurnDone.
 func (c *Client) SendMessage(ctx context.Context, sessionID, text string) error {
 	body := map[string]string{"text": text}
 	return c.do(ctx, http.MethodPost, "/api/v2/sessions/"+esc(sessionID)+"/messages", body, nil)
@@ -158,6 +181,10 @@ func (c *Client) ListPresets(ctx context.Context) ([]Preset, error) {
 }
 
 func (c *Client) CreatePreset(ctx context.Context, p CreatePresetParams) (*Preset, error) {
+	if p.AvatarID == "" {
+		p.AvatarID = p.VisualCharacterID
+	}
+	p.VisualCharacterID = ""
 	var out Preset
 	err := c.do(ctx, http.MethodPost, "/api/v2/presets", p, &out)
 	return &out, err
@@ -190,7 +217,7 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.APIKey)
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "anva-go/0.2.0")
+	req.Header.Set("User-Agent", "anva-go/0.3.0")
 	httpc := c.HTTPClient
 	if httpc == nil {
 		httpc = http.DefaultClient

@@ -1,105 +1,117 @@
 # Anva SDKs
 
-Official SDKs for [Anva](https://anva.ai) — live AI avatars for your product.
-Turn a photo into a talking avatar your audience can speak with, then serve
-it from your own stack.
+Clients for Anva's session, billing, capability and realtime-control APIs.
+API keys and authenticated sockets belong on your backend; give browsers only
+the returned `embed_url` for WebRTC audio/video.
 
-| Language | Install | Docs |
+Install SDK **0.3.0**:
+
+| Language | Install | Import |
 |---|---|---|
-| Python | `pip install anva` | [python/](python/) |
-| JavaScript / TypeScript | `npm install anva-sdk` | [js/](js/) |
-| Go | `go get github.com/Anva-avatars/anva-sdk/go` | [go/](go/) |
+| Python | `pip install "anva[ws]==0.3.0"` | `from anva import Anva` |
+| JavaScript / TypeScript | `npm install anva-sdk@0.3.0` | `import { Anva } from "anva-sdk"` |
+| Go | `go get github.com/Anva-avatars/anva-sdk/go@v0.3.0` | `import anva "github.com/Anva-avatars/anva-sdk/go"` |
 
-All three are thin, dependency-free clients over the same REST API
-(`https://anva.ai/api/v2`), authenticated with an API key from your
-[dashboard](https://anva.ai/dashboard/keys).
+The production base defaults to `https://anva.ai`. Set `base_url`, `baseUrl`, or
+`Client.BaseURL` to your updated deployment for local integration.
 
-## The 60-second version
+## Modes
 
-```python
-from anva import Anva
+Select `service_mode` at creation. Python uses `service_mode`, JS
+`serviceMode`, and Go `ServiceMode`. It is pinned to the session grant.
 
-client = Anva("anva_key_...")
-session = client.create_session(preset_id="preset_...")
-print(session["embed_url"])   # drop into an <iframe allow="camera; microphone; autoplay">
+| Mode | Input supplied by your app | Token-plan rate / connected minute |
+|---|---|---:|
+| `avatar_only` | PCM voice audio; you supply LLM/voice/transcription | 10 |
+| `byo_llm` | Text deltas for requested turns | 50 |
+| `anva_light` | User interaction and instructions | 60 |
+| `anva_expressive` | User interaction and instructions | 80 |
+| `elevenagents_max` | User interaction and agent configuration | 120 |
 
-client.send_message(session["session_id"], "Welcome to the demo!")
+Always check `capabilities().modes` for deployment availability. Billing comes
+from the server, not these SDK constants; legacy accounts retain their own unit
+and contract. `GET /billing` returns the account view directly. Creating a mode
+that is unknown, inconsistent or unavailable fails with a structured API error.
 
-for event in client.events(session["session_id"]):   # pip install anva[ws]
-    print(event)              # {"type": "transcript", "role": "user", "text": "..."}
-```
+## Start a managed conversation
 
 ```js
 import { Anva } from "anva-sdk";
-
 const client = new Anva(process.env.ANVA_KEY);
-const session = await client.createSession({ presetId: "preset_..." });
-// hand session.embed_url to your frontend
+const capabilities = await client.capabilities();
+const mode = capabilities.modes.find(item => item.id === "anva_light");
+if (!mode?.available) throw new Error(mode?.reason || "Mode unavailable");
+const session = await client.createSession({
+  presetId: "YOUR_PRESET_ID", serviceMode: "anva_light"
+});
+// Embed session.embed_url with microphone and autoplay permission.
+```
 
-for await (const event of client.events(session.session_id)) {
-  console.log(event);
+Supply exactly one of a saved preset ID or an avatar ID with optional inline
+`systemPrompt`, `voiceId`, and `languageCode`. Deprecated `llmMode` aliases remain
+available. The server rejects conflicting canonical and legacy options.
+
+`sendMessage` supplies **user input** to the conversation, not verbatim speech.
+Use `byo_llm` with `turnDelta` / `turnDone` for your AI's replies. The old `say`
+command is unavailable. Do not create a fake user message for a greeting; managed
+presentation uses `updateContext`, its acknowledgement, then `startPresentation`.
+
+## One socket for events and commands
+
+```js
+const stream = await client.connect(session.session_id);
+try {
+  for await (const event of stream) {
+    console.log(event.type, event.payload);
+    // On a BYO LLM turn.request, generate in a cancellable worker and send:
+    // await stream.turnDelta(event.payload.turn_id, textChunk);
+    // await stream.turnDone(event.payload.turn_id);
+    // On turn.cancel, stop that worker and discard its pending chunks.
+  }
+} finally {
+  stream.close();
+  await client.endSession(session.session_id);
 }
 ```
 
-```go
-client := anva.New(os.Getenv("ANVA_KEY"))
-session, err := client.CreateSession(ctx, anva.CreateSessionParams{
-    PresetID: "preset_...",
-})
-// session.EmbedURL → your frontend; client.EventsURL(id) → any WebSocket lib
+`connect` gives access to `message`, `interrupt`, `turnDelta`, `turnDone`,
+`turnCancel`, `updateContext`, `startPresentation`, and PCM methods. Python has the
+same methods in snake_case. Go's `NewRealtime(socket)` accepts a connection
+implementing `ReadJSON`, `WriteJSON`, and `Close` (for example Gorilla WebSocket).
+The SDK does not add a Go WebSocket dependency. Only one event reader may consume
+a socket. Do slow LLM work separately so cancellation events remain responsive.
+
+`events()` remains a receive-only convenience. Closing a control socket does not
+end the session. Explicitly call `endSession` when finished.
+
+## PCM voice input
+
+Available only with `avatar_only` and an audio-capable deployment. Supply raw
+signed 16-bit little-endian PCM, 24 kHz mono, with no WAV header. Open the media
+embed first; an events socket cannot render or acknowledge media playback.
+
+- `startSpeech(turnId, {text?})` sends codec metadata; await `speech.state: started`.
+- `appendSpeech(turnId, seq, startSample, pcmBytes)` sends at most 12,000 samples.
+- `seq` starts at 0; `startSample` is the exact cumulative sample count.
+- `finishSpeech(turnId, totalSamples)` finalizes the accepted total.
+- `cancelSpeech(turnId)` abandons the utterance; session `interrupt()` also stops it.
+
+Only one utterance may be active. Keep unplayed audio below five seconds using
+`speech.state.accepted_samples` and `played_samples`. `finished` confirms media
+playback, not upload completion. Errors remain structured `speech.state` events;
+stop the producer instead of blindly retrying old chunks. Optional text is caption
+metadata, not a TTS prompt. Use a fresh turn ID after cancellation.
+
+REST equivalents exist on the client for speech, context and presentation. An
+HTTP acceptance only forwards a command; keep the event socket open for the
+core acknowledgement. See [API docs](https://anva.ai/docs) for envelopes and limits.
+
+## Validation
+
+```sh
+node --test js/test/*.test.js
+PYTHONPATH=python/src python3 -m unittest discover -s python/tests
+(cd go && go test ./...)
 ```
 
-## Two ways to start a session
-
-`create_session` accepts **either** a saved preset **or** an avatar plus an
-inline persona:
-
-- **Embed tier** — pass a `preset_id` (a persona you saved in the Playground).
-- **Advanced tier** — pass an `avatar_id` and supply the persona
-  (`system_prompt`, `voice_id`, `language_code`) inline; nothing is stored
-  server-side.
-
-```python
-session = client.create_session(
-    avatar_id="avatar_...",
-    system_prompt="You are a friendly guide.",
-    voice_id="voice_...",
-    language_code="en-US",
-)
-```
-
-```js
-const session = await client.createSession({
-  avatarId: "avatar_...",
-  systemPrompt: "You are a friendly guide.",
-  voiceId: "voice_...",
-  languageCode: "en-US",
-});
-```
-
-```go
-session, err := client.CreateSession(ctx, anva.CreateSessionParams{
-    AvatarID:     "avatar_...",
-    SystemPrompt: "You are a friendly guide.",
-    VoiceID:      "voice_...",
-    LanguageCode: "en-US",
-})
-```
-
-## What you can do
-
-- **Sessions** — create (returns an iframe-ready `embed_url`), inspect, end.
-- **Speak** — `send_message` makes the avatar say something; `interrupt`
-  stops it mid-sentence; `trigger_action` fires avatar actions.
-- **Live events** — a WebSocket stream of transcripts and state changes.
-- **Presets** — list, create, fetch and delete saved personas (avatar +
-  system prompt + voice) programmatically.
-- **Instances** — list per-key usage buckets (the Python and JS clients
-  expose `list_instances` / `listInstances`).
-
-Keep your API key server-side: mint sessions on your backend and hand only
-the `embed_url` to browsers.
-
-## License
-
-MIT © Penguin Robotics
+Tests use fake sockets and local HTTP fixtures. No provider calls are made.

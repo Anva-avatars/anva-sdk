@@ -1,5 +1,7 @@
 import io
 import json
+import sys
+import types
 import unittest
 import urllib.error
 from unittest.mock import patch
@@ -53,4 +55,17 @@ class ClientTests(unittest.TestCase):
             self.assertEqual(next(iter(stream))['payload']['code'],'stale_turn')
         self.assertTrue(socket.closed)
         self.assertEqual([e['type'] for e in socket.sent],['turn.delta','turn.done','context.update','presentation.start','interrupt','speech.append'])
+    def test_session_duration_limit(self):
+        with patch('urllib.request.urlopen',self.open):
+            self.client.create_session('p');self.assertNotIn('max_duration_seconds',self.body())
+            self.client.create_session('p',max_duration_seconds=600);self.assertEqual(self.body()['max_duration_seconds'],600)
+    def test_connect_authenticates_with_header(self):
+        calls=[];client_mod=types.ModuleType('websockets.sync.client')
+        client_mod.connect=lambda uri,**kw:calls.append((uri,kw)) or Socket()
+        modules={'websockets':types.ModuleType('websockets'),'websockets.sync':types.ModuleType('websockets.sync'),'websockets.sync.client':client_mod}
+        with patch.dict(sys.modules,modules):self.client.connect('s')
+        uri,kw=calls[0]
+        self.assertEqual(uri,'wss://fixture.invalid/api/v2/sessions/s/events')
+        self.assertEqual(kw['additional_headers'],{'Authorization':'Bearer fixture-key'})
+        with self.assertWarns(DeprecationWarning):self.assertTrue(self.client.events_url('s').endswith('?api_key=fixture-key'))
 if __name__=='__main__': unittest.main()

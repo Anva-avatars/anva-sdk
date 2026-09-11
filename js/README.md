@@ -26,7 +26,10 @@ try {
 }
 ```
 
-Inject WebSocket on older Node: `client.connect(id, {WebSocketImpl})`. Keep keys
+Inject WebSocket on older Node: `client.connect(id, {WebSocketImpl})`; it is
+constructed as `new WebSocketImpl(url, { headers })`, which Node's WebSocket and
+the `ws` package both accept. The API key travels in the handshake's
+`Authorization` header, never the URL (`eventsUrl()` is deprecated). Keep keys
 and sockets server-side. `AnvaError` exposes `status`, `code`, and `details`;
 command errors arrive as structured events. Never log authenticated event URLs.
 

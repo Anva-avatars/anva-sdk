@@ -7,8 +7,9 @@
 //	})
 //	// put session.EmbedURL in an <iframe allow="camera; microphone; autoplay">
 //
-// The event stream is a WebSocket at Client.EventsURL(sessionID) — bring the
-// WebSocket library of your choice; the URL carries authentication.
+// The event stream is a WebSocket at Client.EventsWSURL(sessionID) — bring the
+// WebSocket library of your choice and send Client.AuthHeader() with the
+// handshake.
 package anva
 
 import (
@@ -79,6 +80,9 @@ type CreateSessionParams struct {
 	DynamicExpressions   *bool          `json:"dynamic_expressions,omitempty"`
 	WebhookURL           string         `json:"webhook_url,omitempty"`
 	WebhookSecret        string         `json:"webhook_secret,omitempty"`
+	// MaxDurationSeconds (60–7200) ends the session that long after it goes
+	// live; 0 applies the server's 2-hour ceiling.
+	MaxDurationSeconds int `json:"max_duration_seconds,omitempty"`
 }
 
 // Session is the create-session response.
@@ -92,8 +96,10 @@ type Session struct {
 	ServiceMode  ServiceMode    `json:"service_mode"`
 	Billing      map[string]any `json:"billing"`
 	ExpiresAt    string         `json:"expires_at"`
-	EmbedURL     string         `json:"embed_url"`
-	EventsWSURL  string         `json:"events_ws_url"`
+	// MaxDurationSeconds is how long the session may stay live once connected.
+	MaxDurationSeconds int    `json:"max_duration_seconds"`
+	EmbedURL           string `json:"embed_url"`
+	EventsWSURL        string `json:"events_ws_url"`
 }
 
 // Preset mirrors the public preset resource.
@@ -162,12 +168,26 @@ func (c *Client) TriggerAction(ctx context.Context, sessionID, name string) erro
 	return c.do(ctx, http.MethodPost, "/api/v2/sessions/"+esc(sessionID)+"/actions", body, nil)
 }
 
-// EventsURL is the authenticated WebSocket URL for the session's live event
-// stream (transcripts, state changes). Connect with any WebSocket client.
-func (c *Client) EventsURL(sessionID string) string {
+// EventsWSURL is the WebSocket URL for the session's live event stream
+// (transcripts, state changes). It carries no credentials; send AuthHeader
+// with the handshake, e.g.
+// websocket.DefaultDialer.Dial(c.EventsWSURL(id), c.AuthHeader()).
+func (c *Client) EventsWSURL(sessionID string) string {
 	base := strings.Replace(c.BaseURL, "http", "ws", 1)
-	return base + "/api/v2/sessions/" + esc(sessionID) + "/events?api_key=" +
-		url.QueryEscape(c.APIKey)
+	return base + "/api/v2/sessions/" + esc(sessionID) + "/events"
+}
+
+// AuthHeader authenticates a WebSocket handshake to EventsWSURL.
+func (c *Client) AuthHeader() http.Header {
+	return http.Header{"Authorization": []string{"Bearer " + c.APIKey}}
+}
+
+// EventsURL is the events WebSocket URL with the API key in its query string.
+//
+// Deprecated: proxies and access logs record query strings. Use EventsWSURL
+// with AuthHeader.
+func (c *Client) EventsURL(sessionID string) string {
+	return c.EventsWSURL(sessionID) + "?api_key=" + url.QueryEscape(c.APIKey)
 }
 
 // -- presets ----------------------------------------------------------------

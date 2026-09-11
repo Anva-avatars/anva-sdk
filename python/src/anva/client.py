@@ -10,6 +10,7 @@ import json
 import urllib.error
 import urllib.parse
 import urllib.request
+import warnings
 from typing import Any, Dict, Iterator, Optional
 
 from .realtime import RealtimeSession, speech_start, speech_append
@@ -60,15 +61,19 @@ class Anva:
                        elevenlabs_agent_id: Optional[str] = None,
                        dynamic_expressions: Optional[bool] = None,
                        webhook_url: Optional[str] = None,
-                       webhook_secret: Optional[str] = None) -> Dict[str, Any]:
+                       webhook_secret: Optional[str] = None,
+                       max_duration_seconds: Optional[int] = None) -> Dict[str, Any]:
         """Create a live session, one of two ways:
 
         - Embed tier: pass ``preset_id`` (a saved preset from the Playground).
         - Advanced tier: pass ``avatar_id`` plus the persona (``system_prompt``,
           ``voice_id``, ``language_code``) directly — nothing is stored.
 
+        ``max_duration_seconds`` (60–7200) ends the session that long after it
+        goes live; omitted, the server's 2-hour ceiling applies.
+
         Returns session_id, session_token, embed_url (iframe-ready),
-        events_ws_url, instance_id, preset_id, avatar_id.
+        events_ws_url, instance_id, preset_id, avatar_id, max_duration_seconds.
         """
         if (not preset_id and not avatar_id) or (preset_id and avatar_id):
             raise ValueError("create_session requires exactly one of preset_id or avatar_id")
@@ -93,6 +98,8 @@ class Anva:
             body["webhook_url"] = webhook_url
         if webhook_secret:
             body["webhook_secret"] = webhook_secret
+        if max_duration_seconds is not None:
+            body["max_duration_seconds"] = max_duration_seconds
         return self._request("POST", "/api/v2/sessions", body)
 
     def get_session(self, session_id: str) -> Dict[str, Any]:
@@ -119,11 +126,22 @@ class Anva:
             "POST", f"/api/v2/sessions/{_esc(session_id)}/actions",
             {"name": name})
 
-    def events_url(self, session_id: str) -> str:
-        """The authenticated WebSocket URL for the session's event stream."""
+    def events_ws_url(self, session_id: str) -> str:
+        """The session's event-stream WebSocket URL. It carries no credentials:
+        authenticate the handshake with ``auth_headers()``."""
         ws_base = self.base_url.replace("http", "ws", 1)
-        return (f"{ws_base}/api/v2/sessions/{_esc(session_id)}/events"
-                f"?api_key={urllib.parse.quote(self.api_key)}")
+        return f"{ws_base}/api/v2/sessions/{_esc(session_id)}/events"
+
+    def auth_headers(self) -> Dict[str, str]:
+        return {"Authorization": f"Bearer {self.api_key}"}
+
+    def events_url(self, session_id: str) -> str:
+        """Deprecated: puts the API key in the URL, where proxies and access
+        logs record it. Use ``connect()``, or ``events_ws_url()`` with
+        ``auth_headers()``."""
+        warnings.warn("events_url() puts the API key in the URL; use events_ws_url() with auth_headers()",
+                      DeprecationWarning, stacklevel=2)
+        return f"{self.events_ws_url(session_id)}?api_key={urllib.parse.quote(self.api_key)}"
 
     def connect(self, session_id: str) -> RealtimeSession:
         """Open a bidirectional connection. Requires ``pip install anva[ws]``."""
@@ -131,7 +149,8 @@ class Anva:
             from websockets.sync.client import connect
         except ImportError as e:
             raise RuntimeError("realtime requires pip install anva[ws]") from e
-        return RealtimeSession(connect(self.events_url(session_id)))
+        return RealtimeSession(connect(self.events_ws_url(session_id),
+                                       additional_headers=self.auth_headers()))
 
     def events(self, session_id: str) -> Iterator[Dict[str, Any]]:
         with self.connect(session_id) as stream:

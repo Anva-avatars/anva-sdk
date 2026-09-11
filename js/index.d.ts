@@ -24,6 +24,8 @@ export interface CreateSessionParams {
   dynamicExpressions?: boolean;
   webhookUrl?: string;
   webhookSecret?: string;
+  /** Ends the session this many seconds (60–7200) after it goes live. Omitted = the 2-hour ceiling. */
+  maxDurationSeconds?: number;
 }
 export interface ModeCapability { id: ServiceMode; name: string; available: boolean; reason?: string; input?: string[]; [key: string]: unknown; }
 export interface Capabilities { api_version: string; modes: ModeCapability[]; audio_input?: Record<string, unknown>; [key: string]: unknown; }
@@ -38,6 +40,7 @@ export interface Session {
   llm_mode?: string;
   billing?: SessionBilling;
   expires_at: string;
+  max_duration_seconds: number;
   embed_url: string;
   events_ws_url: string;
   [key: string]: unknown;
@@ -57,7 +60,7 @@ export interface PresentationContext {
   pages: Array<{ id: string; title: string; items: Array<{id: string; text: string}> }>;
 }
 export interface PresentationStart { version: 1; demo: string; revision: number; }
-export interface EventsOptions { WebSocketImpl?: new (url: string) => WebSocket; }
+export interface EventsOptions { WebSocketImpl?: new (url: string, options: { headers: Record<string, string> }) => WebSocket; }
 export type PCMBytes = Uint8Array | ArrayBuffer;
 export declare class AnvaError extends Error {
   constructor(status: number, code: string, message: string, details?: Record<string, unknown>);
@@ -92,6 +95,10 @@ export declare class Anva {
   sendMessage(sessionId: string, text: string): Promise<{status: string}>;
   interrupt(sessionId: string): Promise<{status: string}>;
   triggerAction(sessionId: string, name: string): Promise<{status: string}>;
+  /** Credential-free events URL; authenticate with authHeaders(). */
+  eventsWsUrl(sessionId: string): string;
+  authHeaders(): { Authorization: string };
+  /** @deprecated Puts the API key in the URL. Use connect(), or eventsWsUrl() with authHeaders(). */
   eventsUrl(sessionId: string): string;
   connect(sessionId: string, options?: EventsOptions): Promise<RealtimeSession>;
   events(sessionId: string, options?: EventsOptions): AsyncGenerator<SessionEvent, void, void>;

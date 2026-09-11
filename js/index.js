@@ -15,6 +15,7 @@ import { RealtimeSession, speechStart, speechAppend } from "./realtime.js";
 export { RealtimeSession } from "./realtime.js";
 
 const DEFAULT_BASE_URL = "https://anva.ai";
+let warnedEventsUrl = false;
 
 export class AnvaError extends Error {
   constructor(status, code, message, details = {}) {
@@ -47,12 +48,15 @@ export class Anva {
    * Returns { session_id, session_token, embed_url, events_ws_url, expires_at,
    * instance_id, preset_id, avatar_id, ... }.
    *
+   * `maxDurationSeconds` (60–7200) ends the session that long after it goes
+   * live; omitted, the server's 2-hour ceiling applies.
+   *
    * @param {{presetId?: string, avatarId?: string, systemPrompt?: string,
    *   voiceId?: string, languageCode?: string, llmMode?: string,
-   *   webhookUrl?: string, webhookSecret?: string}} params
+   *   webhookUrl?: string, webhookSecret?: string, maxDurationSeconds?: number}} params
    */
   createSession(params = {}) {
-    const { presetId, avatarId, systemPrompt, voiceId, languageCode, llmMode, serviceMode, performanceOptions, conversationProvider, performanceMode, elevenlabsAgentId, dynamicExpressions, webhookUrl, webhookSecret } = params;
+    const { presetId, avatarId, systemPrompt, voiceId, languageCode, llmMode, serviceMode, performanceOptions, conversationProvider, performanceMode, elevenlabsAgentId, dynamicExpressions, webhookUrl, webhookSecret, maxDurationSeconds } = params;
     if ((!presetId && !avatarId) || (presetId && avatarId)) {
       throw new Error("createSession requires exactly one of presetId or avatarId");
     }
@@ -71,6 +75,7 @@ export class Anva {
     if (dynamicExpressions !== undefined) body.dynamic_expressions = dynamicExpressions;
     if (webhookUrl) body.webhook_url = webhookUrl;
     if (webhookSecret) body.webhook_secret = webhookSecret;
+    if (maxDurationSeconds !== undefined) body.max_duration_seconds = maxDurationSeconds;
     return this._request("POST", "/api/v2/sessions", body);
   }
 
@@ -97,17 +102,35 @@ export class Anva {
     return this._request("POST", `/api/v2/sessions/${enc(sessionId)}/actions`, { name });
   }
 
-  /** The authenticated WebSocket URL for the session's event stream. */
-  eventsUrl(sessionId) {
+  /** The session's event-stream WebSocket URL. It carries no credentials:
+   * authenticate the handshake with `authHeaders()`. */
+  eventsWsUrl(sessionId) {
     const ws = this.baseUrl.replace(/^http/, "ws");
-    return `${ws}/api/v2/sessions/${enc(sessionId)}/events?api_key=${encodeURIComponent(this.apiKey)}`;
+    return `${ws}/api/v2/sessions/${enc(sessionId)}/events`;
   }
 
-  /** Open a single socket for both events and turn/presentation/speech commands. */
+  authHeaders() {
+    return { Authorization: `Bearer ${this.apiKey}` };
+  }
+
+  /** @deprecated Puts the API key in the URL, where proxies and access logs
+   * record it. Use `connect()`, or `eventsWsUrl()` with `authHeaders()`. */
+  eventsUrl(sessionId) {
+    if (!warnedEventsUrl) {
+      warnedEventsUrl = true;
+      globalThis.process?.emitWarning?.("eventsUrl() puts the API key in the URL; use eventsWsUrl() with authHeaders()", "DeprecationWarning");
+    }
+    return `${this.eventsWsUrl(sessionId)}?api_key=${encodeURIComponent(this.apiKey)}`;
+  }
+
+  /** Open a single socket for both events and turn/presentation/speech commands.
+   * The key travels in the handshake's Authorization header, which Node's
+   * WebSocket and the `ws` package accept as `{ headers }`; browsers cannot
+   * send it, and the key does not belong in a browser anyway. */
   async connect(sessionId, { WebSocketImpl } = {}) {
     const WS = WebSocketImpl || globalThis.WebSocket;
     if (!WS) throw new Error('No WebSocket implementation; pass { WebSocketImpl }');
-    const stream = new RealtimeSession(new WS(this.eventsUrl(sessionId)));
+    const stream = new RealtimeSession(new WS(this.eventsWsUrl(sessionId), { headers: this.authHeaders() }));
     try { await stream.ready; return stream; } catch (error) { stream.close(); throw error; }
   }
   async *events(sessionId, options = {}) {

@@ -12,6 +12,8 @@ test('five canonical modes and compatible explicit false options reach session c
  }
  assert.throws(()=>client.createSession({presetId:'p',avatarId:'a'}),/exactly one/);
  await client.createSession({presetId:'p',llmMode:'external'});assert.equal(requests.at(-1).body.llm_mode,'external');
+ await client.createSession({presetId:'p',maxDurationSeconds:600});assert.equal(requests.at(-1).body.max_duration_seconds,600);
+ assert.equal(client.eventsWsUrl('s'),'wss://fixture.invalid/api/v2/sessions/s/events');assert.match(client.eventsUrl('s'),/\?api_key=fixture-key$/);
 });
 test('canonical preset ID, discovery and REST presentation commands use actual endpoints',async()=>{
  await client.createPreset({name:'Guide',visualCharacterId:'legacy-avatar'});assert.equal(requests.at(-1).body.avatar_id,'legacy-avatar');
@@ -35,13 +37,14 @@ test('structured HTTP error preserves status, code and retry fields',async()=>{
 });
 class FakeWS {
  static sockets=[];
- constructor(url){this.url=url;this.sent=[];this.readyState=0;FakeWS.sockets.push(this);queueMicrotask(()=>{this.readyState=1;this.onopen?.();});}
+ constructor(url,options){this.url=url;this.options=options;this.sent=[];this.readyState=0;FakeWS.sockets.push(this);queueMicrotask(()=>{this.readyState=1;this.onopen?.();});}
  send(data){this.sent.push(JSON.parse(data));}
  close(){this.readyState=3;this.onclose?.({code:1000});}
  emit(payload){this.onmessage?.({data:JSON.stringify(payload)});}
 }
 test('one bidirectional socket carries commands and structured events and closes on break',async()=>{
  const stream=await client.connect('s',{WebSocketImpl:FakeWS});const socket=FakeWS.sockets.at(-1);
+ assert.equal(socket.url,'wss://fixture.invalid/api/v2/sessions/s/events');assert.equal(socket.options.headers.Authorization,'Bearer fixture-key');
  await stream.turnDelta('t','Hello');await stream.turnDone('t');await stream.updateContext({version:1});await stream.startPresentation({version:1,demo:'anva',revision:1});await stream.interrupt();
  await stream.appendSpeech('t',0,0,new Uint8Array([1,2]));
  assert.deepEqual(socket.sent.map(m=>m.type),['turn.delta','turn.done','context.update','presentation.start','interrupt','speech.append']);

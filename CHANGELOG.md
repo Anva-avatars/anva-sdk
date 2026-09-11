@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- Realtime connections authenticate with an `Authorization` header instead of
+  putting the API key in the WebSocket URL. Python `connect()` and JS `connect()`
+  switch automatically; Go callers dial `EventsWSURL` with `AuthHeader()`.
+- Deprecated: `events_url` / `eventsUrl` / `EventsURL`. They still work, and warn
+  (Python `DeprecationWarning`, Node `DeprecationWarning`, Go `Deprecated:`).
+- JS: a custom `WebSocketImpl` is now constructed as `new WebSocketImpl(url, { headers })`.
+- `max_duration_seconds` / `maxDurationSeconds` / `MaxDurationSeconds` on session
+  creation (60–7200). Requires a deployment with session duration limits.
+
 ## 0.3.0 — 2026-09-11
 
 - Explicit service modes: Avatar Only, BYO LLM, Anva Light, Anva Expressive and ElevenAgents Max.

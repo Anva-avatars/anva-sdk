@@ -7,7 +7,7 @@ import (
 )
 
 // JSONSocket is implemented by WebSocket libraries such as gorilla/websocket.
-// Establish the socket using Client.EventsURL; keep that authenticated URL private.
+// Establish the socket at Client.EventsWSURL with Client.AuthHeader.
 type JSONSocket interface {
 	ReadJSON(any) error
 	WriteJSON(any) error

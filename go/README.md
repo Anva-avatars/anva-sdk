@@ -23,8 +23,11 @@ if err != nil { panic(err) }
 `BYOLLM`, `AnvaLight`, `AnvaExpressive`, and `ElevenAgentsMax`. The server resolves
 availability, conflicts and billing. `LLMMode` remains a deprecated alias.
 
-Connect a WebSocket to `client.EventsURL(session.SessionID)` on your backend,
-then use `stream := anva.NewRealtime(socket)`. The socket implements `ReadJSON`,
+Connect a WebSocket to `client.EventsWSURL(session.SessionID)` on your backend,
+sending `client.AuthHeader()` with the handshake (for Gorilla:
+`websocket.DefaultDialer.Dial(client.EventsWSURL(id), client.AuthHeader())`),
+then use `stream := anva.NewRealtime(socket)`. `EventsURL`, which puts the key in
+the query string, is deprecated. The socket implements `ReadJSON`,
 `WriteJSON`, `Close`. `stream.Receive()` reads an envelope; `TurnDelta`, `TurnDone`,
 `TurnCancel`, `Interrupt`, `UpdateContext`, `StartPresentation`, and speech methods
 send commands on the same socket. Writers are serialized; use one event reader.
@@ -36,5 +39,5 @@ Raw PCM must be signed16 little-endian, 24kHz mono. Chunks are at most 24,000 by
 observe `speech.state` and bound unplayed audio to five seconds. Closing the
 control socket does not end a session; call `EndSession` when finished.
 
-Errors are `*anva.Error` with `Status`, `Code`, `Message`. Never log the
-API-key-bearing events URL. See the repository README for protocol details.
+Errors are `*anva.Error` with `Status`, `Code`, `Message`. See the repository
+README for protocol details.

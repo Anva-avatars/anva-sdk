@@ -4,13 +4,13 @@ Clients for Anva's session, billing, capability and realtime-control APIs.
 API keys and authenticated sockets belong on your backend; give browsers only
 the returned `embed_url` for WebRTC audio/video.
 
-Install SDK **0.3.0**:
+Install SDK **0.4.0**:
 
 | Language | Install | Import |
 |---|---|---|
-| Python | `pip install "anva[ws]==0.3.0"` | `from anva import Anva` |
-| JavaScript / TypeScript | `npm install anva-sdk@0.3.0` | `import { Anva } from "anva-sdk"` |
-| Go | `go get github.com/Anva-avatars/anva-sdk/go@v0.3.0` | `import anva "github.com/Anva-avatars/anva-sdk/go"` |
+| Python | `pip install "anva[ws]==0.4.0"` | `from anva import Anva` |
+| JavaScript / TypeScript | `npm install anva-sdk@0.4.0` | `import { Anva } from "anva-sdk"` |
+| Go | `go get github.com/Anva-avatars/anva-sdk/go@v0.4.0` | `import anva "github.com/Anva-avatars/anva-sdk/go"` |
 
 The production base defaults to `https://anva.ai`. Set `base_url`, `baseUrl`, or
 `Client.BaseURL` to your updated deployment for local integration.

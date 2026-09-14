@@ -83,6 +83,10 @@ type CreateSessionParams struct {
 	// MaxDurationSeconds (60–7200) ends the session that long after it goes
 	// live; 0 applies the server's 2-hour ceiling.
 	MaxDurationSeconds int `json:"max_duration_seconds,omitempty"`
+	// Metadata is an optional flat map (string, number or bool values, up to
+	// 20 keys, 4 KB serialized) stored with the session and echoed on the
+	// session, on session.info and in every webhook payload.
+	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
 // Session is the create-session response.
@@ -98,6 +102,8 @@ type Session struct {
 	ExpiresAt    string         `json:"expires_at"`
 	// MaxDurationSeconds is how long the session may stay live once connected.
 	MaxDurationSeconds int    `json:"max_duration_seconds"`
+	// Metadata echoes the map passed at creation, if any.
+	Metadata map[string]any `json:"metadata,omitempty"`
 	EmbedURL           string `json:"embed_url"`
 	EventsWSURL        string `json:"events_ws_url"`
 }
@@ -237,7 +243,7 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.APIKey)
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "anva-go/0.3.0")
+	req.Header.Set("User-Agent", "anva-go/0.4.0")
 	httpc := c.HTTPClient
 	if httpc == nil {
 		httpc = http.DefaultClient

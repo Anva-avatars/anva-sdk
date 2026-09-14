@@ -1,6 +1,6 @@
 # anva — Python SDK
 
-Install with `pip install "anva[ws]==0.3.0"`.
+Install with `pip install "anva[ws]==0.4.0"`.
 The REST client uses the standard library. Realtime uses `websockets`' sync API.
 
 ```python

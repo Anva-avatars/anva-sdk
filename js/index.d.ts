@@ -26,6 +26,8 @@ export interface CreateSessionParams {
   webhookSecret?: string;
   /** Ends the session this many seconds (60–7200) after it goes live. Omitted = the 2-hour ceiling. */
   maxDurationSeconds?: number;
+  /** Flat map (string/number/boolean values, ≤20 keys, ≤4 KB) echoed on the session, session.info and webhooks. */
+  metadata?: Record<string, string | number | boolean>;
 }
 export interface ModeCapability { id: ServiceMode; name: string; available: boolean; reason?: string; input?: string[]; [key: string]: unknown; }
 export interface Capabilities { api_version: string; modes: ModeCapability[]; audio_input?: Record<string, unknown>; [key: string]: unknown; }
@@ -41,6 +43,7 @@ export interface Session {
   billing?: SessionBilling;
   expires_at: string;
   max_duration_seconds: number;
+  metadata?: Record<string, string | number | boolean>;
   embed_url: string;
   events_ws_url: string;
   [key: string]: unknown;

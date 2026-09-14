@@ -51,12 +51,17 @@ export class Anva {
    * `maxDurationSeconds` (60–7200) ends the session that long after it goes
    * live; omitted, the server's 2-hour ceiling applies.
    *
+   * `metadata` is an optional flat object (string, number or boolean values,
+   * up to 20 keys, 4 KB serialized) stored with the session and echoed on
+   * the session, on `session.info`, and in every webhook payload.
+   *
    * @param {{presetId?: string, avatarId?: string, systemPrompt?: string,
    *   voiceId?: string, languageCode?: string, llmMode?: string,
-   *   webhookUrl?: string, webhookSecret?: string, maxDurationSeconds?: number}} params
+   *   webhookUrl?: string, webhookSecret?: string, maxDurationSeconds?: number,
+   *   metadata?: Record<string, string | number | boolean>}} params
    */
   createSession(params = {}) {
-    const { presetId, avatarId, systemPrompt, voiceId, languageCode, llmMode, serviceMode, performanceOptions, conversationProvider, performanceMode, elevenlabsAgentId, dynamicExpressions, webhookUrl, webhookSecret, maxDurationSeconds } = params;
+    const { presetId, avatarId, systemPrompt, voiceId, languageCode, llmMode, serviceMode, performanceOptions, conversationProvider, performanceMode, elevenlabsAgentId, dynamicExpressions, webhookUrl, webhookSecret, maxDurationSeconds, metadata } = params;
     if ((!presetId && !avatarId) || (presetId && avatarId)) {
       throw new Error("createSession requires exactly one of presetId or avatarId");
     }
@@ -76,6 +81,7 @@ export class Anva {
     if (webhookUrl) body.webhook_url = webhookUrl;
     if (webhookSecret) body.webhook_secret = webhookSecret;
     if (maxDurationSeconds !== undefined) body.max_duration_seconds = maxDurationSeconds;
+    if (metadata !== undefined) body.metadata = metadata;
     return this._request("POST", "/api/v2/sessions", body);
   }
 
@@ -191,7 +197,7 @@ export class Anva {
       headers: {
         Authorization: `Bearer ${this.apiKey}`,
         "Content-Type": "application/json",
-        "User-Agent": "anva-js/0.3.0",
+        "User-Agent": "anva-js/0.4.0",
       },
       body: body === undefined ? undefined : JSON.stringify(body),
     });

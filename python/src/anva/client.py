@@ -62,7 +62,8 @@ class Anva:
                        dynamic_expressions: Optional[bool] = None,
                        webhook_url: Optional[str] = None,
                        webhook_secret: Optional[str] = None,
-                       max_duration_seconds: Optional[int] = None) -> Dict[str, Any]:
+                       max_duration_seconds: Optional[int] = None,
+                       metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Create a live session, one of two ways:
 
         - Embed tier: pass ``preset_id`` (a saved preset from the Playground).
@@ -71,6 +72,10 @@ class Anva:
 
         ``max_duration_seconds`` (60–7200) ends the session that long after it
         goes live; omitted, the server's 2-hour ceiling applies.
+
+        ``metadata`` is an optional flat dict (str, int, float or bool values,
+        up to 20 keys, 4 KB serialized) stored with the session and echoed on
+        the session, on ``session.info`` and in every webhook payload.
 
         Returns session_id, session_token, embed_url (iframe-ready),
         events_ws_url, instance_id, preset_id, avatar_id, max_duration_seconds.
@@ -100,6 +105,8 @@ class Anva:
             body["webhook_secret"] = webhook_secret
         if max_duration_seconds is not None:
             body["max_duration_seconds"] = max_duration_seconds
+        if metadata is not None:
+            body["metadata"] = metadata
         return self._request("POST", "/api/v2/sessions", body)
 
     def get_session(self, session_id: str) -> Dict[str, Any]:
@@ -238,7 +245,7 @@ class Anva:
             headers={
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",
-                "User-Agent": "anva-python/0.3.0",
+                "User-Agent": "anva-python/0.4.0",
             })
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:

@@ -2,7 +2,7 @@
 
 Standard-library REST client and a bidirectional wrapper for your chosen
 WebSocket library. Install with
-`go get github.com/Anva-avatars/anva-sdk/go@v0.3.0`.
+`go get github.com/Anva-avatars/anva-sdk/go@v0.4.0`.
 
 ```go
 import (

@@ -1,5 +1,7 @@
 /** Official Anva SDK. All API keys and authenticated realtime sockets belong on your server. */
 export type ServiceMode = 'avatar_only' | 'byo_llm' | 'anva_light' | 'anva_expressive' | 'elevenagents_max';
+/** "off": the host transcribes the user and sends text (push-to-talk); no microphone. */
+export type SpeechInput = 'on' | 'off';
 export interface AnvaOptions { baseUrl?: string; }
 export interface PerformanceOptions {
   conversation_provider?: string;
@@ -28,6 +30,8 @@ export interface CreateSessionParams {
   maxDurationSeconds?: number;
   /** Flat map (string/number/boolean values, ≤20 keys, ≤4 KB) echoed on the session, session.info and webhooks. */
   metadata?: Record<string, string | number | boolean>;
+  /** "off" for byo_llm, anva_light or anva_expressive hosts that transcribe the user themselves. */
+  speechInput?: SpeechInput;
 }
 export interface ModeCapability { id: ServiceMode; name: string; available: boolean; reason?: string; input?: string[]; [key: string]: unknown; }
 export interface Capabilities { api_version: string; modes: ModeCapability[]; audio_input?: Record<string, unknown>; [key: string]: unknown; }
@@ -43,6 +47,7 @@ export interface Session {
   billing?: SessionBilling;
   expires_at: string;
   max_duration_seconds: number;
+  speech_input?: SpeechInput;
   metadata?: Record<string, string | number | boolean>;
   embed_url: string;
   events_ws_url: string;
@@ -73,6 +78,8 @@ export declare class AnvaError extends Error {
 export declare class RealtimeSession implements AsyncIterable<SessionEvent> {
   constructor(socket: WebSocket);
   ready: Promise<RealtimeSession>;
+  /** Resolves with the session.live payload once the viewer's embed is connected. */
+  live: Promise<Record<string, unknown>>;
   closed: boolean;
   send(type: string, payload?: Record<string, unknown>): Promise<void>;
   message(text: string): Promise<void>;
@@ -82,12 +89,48 @@ export declare class RealtimeSession implements AsyncIterable<SessionEvent> {
   turnDelta(turnId: string, text: string): Promise<void>;
   turnDone(turnId: string): Promise<void>;
   turnCancel(turnId: string, reason?: string): Promise<void>;
+  say(text: string, sayId?: string): Promise<void>;
+  sayDelta(sayId: string, text: string): Promise<void>;
+  sayDone(sayId: string): Promise<void>;
   startSpeech(turnId: string, options?: {text?: string}): Promise<void>;
   appendSpeech(turnId: string, seq: number, startSample: number, pcm: PCMBytes): Promise<void>;
   finishSpeech(turnId: string, totalSamples: number): Promise<void>;
   cancelSpeech(turnId: string): Promise<void>;
   close(): void;
   [Symbol.asyncIterator](): AsyncGenerator<SessionEvent, void, void>;
+}
+export type LipsyncPreset = 'hybrid' | 'lowlat';
+export interface LipsyncOptions { sampleRate?: number; preset?: LipsyncPreset; contentType?: string; }
+export interface LipsyncStreamOptions extends EventsOptions { sampleRate?: 16000 | 24000; preset?: LipsyncPreset; }
+/** frames[n][i] is channels[i] at n / fps seconds. */
+export interface LipsyncResult {
+  id: string; fps: number; frame_count: number; duration_s: number;
+  channels: string[]; frames: number[][]; preset: LipsyncPreset; model: string;
+  billing: { unit: string; basis: string; seconds: number; tokens_per_minute: number };
+  [key: string]: unknown;
+}
+export interface LipsyncMessage {
+  type: 'ready' | 'frames' | 'flushed' | 'error';
+  start?: number; values?: number[][]; frame_count?: number;
+  fps?: number; channels?: string[]; delay_ms?: number; input_sample_rate?: number;
+  code?: string; message?: string;
+  [key: string]: unknown;
+}
+export declare class LipsyncStream implements AsyncIterable<LipsyncMessage> {
+  constructor(socket: WebSocket);
+  ready: Promise<LipsyncStream>;
+  closed: boolean;
+  audio(pcm: PCMBytes): Promise<void>;
+  flush(): Promise<void>;
+  send(type: string, payload?: Record<string, unknown>): Promise<void>;
+  close(): void;
+  [Symbol.asyncIterator](): AsyncGenerator<LipsyncMessage, void, void>;
+}
+export interface AvatarInfo {
+  id: string; name: string; kind: 'builtin' | 'official' | 'custom'; ready: boolean;
+  icon?: string;
+  /** Absolute portrait URL, fetchable without credentials until icon_expires_at. */
+  icon_url?: string; icon_expires_at?: string;
 }
 export declare class Anva {
   constructor(apiKey: string, opts?: AnvaOptions);
@@ -96,6 +139,7 @@ export declare class Anva {
   getSession(sessionId: string): Promise<Record<string, unknown>>;
   endSession(sessionId: string): Promise<Record<string, unknown>>;
   sendMessage(sessionId: string, text: string): Promise<{status: string}>;
+  say(sessionId: string, text: string, options?: {sayId?: string}): Promise<{status: string; say_id: string}>;
   interrupt(sessionId: string): Promise<{status: string}>;
   triggerAction(sessionId: string, name: string): Promise<{status: string}>;
   /** Credential-free events URL; authenticate with authHeaders(). */
@@ -107,7 +151,10 @@ export declare class Anva {
   events(sessionId: string, options?: EventsOptions): AsyncGenerator<SessionEvent, void, void>;
   capabilities(): Promise<Capabilities>;
   billing(): Promise<Record<string, unknown>>;
-  listAvatars(): Promise<Record<string, unknown>>;
+  listAvatars(): Promise<{avatars: AvatarInfo[]}>;
+  lipsync(audio: PCMBytes | Blob, options?: LipsyncOptions): Promise<LipsyncResult>;
+  lipsyncStreamUrl(options?: {sampleRate?: 16000 | 24000; preset?: LipsyncPreset}): string;
+  connectLipsync(options?: LipsyncStreamOptions): Promise<LipsyncStream>;
   listVoices(): Promise<Record<string, unknown>>;
   listLanguages(): Promise<Record<string, unknown>>;
   updateContext(sessionId: string, context: PresentationContext): Promise<Record<string, unknown>>;

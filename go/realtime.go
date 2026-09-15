@@ -54,6 +54,40 @@ func (r *Realtime) TurnDone(turnID string) error {
 func (r *Realtime) TurnCancel(turnID, reason string) error {
 	return r.Send("turn.cancel", map[string]any{"turn_id": turnID, "reason": reason})
 }
+
+// Say speaks one host line in the session voice (BYOLLM); sayID may be empty.
+func (r *Realtime) Say(text, sayID string) error {
+	p := map[string]any{"text": text}
+	if sayID != "" {
+		p["say_id"] = sayID
+	}
+	return r.Send("say", p)
+}
+func (r *Realtime) SayDelta(sayID, text string) error {
+	return r.Send("say.delta", map[string]any{"say_id": sayID, "text": text})
+}
+func (r *Realtime) SayDone(sayID string) error {
+	return r.Send("say.done", map[string]any{"say_id": sayID})
+}
+
+// WaitLive reads until the viewer's embed is connected and returns the
+// session.live envelope; commands sent before it are refused. Only
+// session.info and error frames can precede it, and they are discarded.
+func (r *Realtime) WaitLive() (Envelope, error) {
+	for {
+		event, err := r.Receive()
+		if err != nil {
+			return event, err
+		}
+		switch event.Type {
+		case "session.live":
+			return event, nil
+		case "session.ended":
+			return event, fmt.Errorf("the session ended before the viewer connected")
+		}
+	}
+}
+
 func speechStart(turnID, text string) map[string]any {
 	p := map[string]any{"turn_id": turnID, "codec": "pcm_s16le", "sample_rate": 24000, "channels": 1}
 	if text != "" {

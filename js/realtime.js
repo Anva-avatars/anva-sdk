@@ -11,21 +11,33 @@ export class RealtimeSession {
       this.resolveReady = resolve;
       this.rejectReady = reject;
     });
+    // Resolves with the session.live payload once the viewer's embed is
+    // connected; commands sent before it are refused.
+    this.live = new Promise((resolve, reject) => {
+      this.resolveLive = resolve;
+      this.rejectLive = reject;
+    });
+    this.live.catch(() => {});
     socket.onopen = () => this.resolveReady(this);
     socket.onmessage = event => {
-      try { this.queue.push(JSON.parse(event.data)); } catch { return; }
+      let message;
+      try { message = JSON.parse(event.data); } catch { return; }
+      if (message?.type === 'session.live') this.resolveLive(message.payload ?? {});
+      this.queue.push(message);
       this.wake();
     };
     socket.onclose = event => {
       this.closed = true;
       if (event.code !== 1000 && event.code !== undefined) this.failure ||= new Error(`Events socket closed (${event.code})`);
       this.rejectReady(this.failure || new Error('Events socket closed before opening'));
+      this.rejectLive(this.failure || new Error('Events socket closed before the viewer connected'));
       this.wake();
     };
     socket.onerror = () => {
       this.failure = new Error('Events socket error');
       this.closed = true;
       this.rejectReady(this.failure);
+      this.rejectLive(this.failure);
       this.close();
       this.wake();
     };
@@ -44,6 +56,10 @@ export class RealtimeSession {
   turnDelta(turnId, text) { return this.send('turn.delta', { turn_id: turnId, text }); }
   turnDone(turnId) { return this.send('turn.done', { turn_id: turnId }); }
   turnCancel(turnId, reason = '') { return this.send('turn.cancel', { turn_id: turnId, reason }); }
+  /** Speak a host line in the session voice (byo_llm). */
+  say(text, sayId) { return this.send('say', sayId ? { text, say_id: sayId } : { text }); }
+  sayDelta(sayId, text) { return this.send('say.delta', { say_id: sayId, text }); }
+  sayDone(sayId) { return this.send('say.done', { say_id: sayId }); }
   startSpeech(turnId, { text } = {}) { return this.send('speech.start', speechStart(turnId, text)); }
   appendSpeech(turnId, seq, startSample, pcm) { return this.send('speech.append', speechAppend(turnId, seq, startSample, pcm)); }
   finishSpeech(turnId, totalSamples) { return this.send('speech.done', { turn_id: turnId, total_samples: totalSamples }); }
@@ -53,6 +69,7 @@ export class RealtimeSession {
     this.closeRequested = true;
     this.closed = true;
     this.rejectReady(new Error('Events socket closed before opening'));
+    this.rejectLive(new Error('Events socket closed before the viewer connected'));
     try { this.socket.close(1000); } finally { this.wake(); }
   }
   async *[Symbol.asyncIterator]() {
@@ -65,6 +82,21 @@ export class RealtimeSession {
       if (this.failure) throw this.failure;
     } finally { this.close(); }
   }
+}
+/** Lipsync API stream (Enterprise): binary PCM in, curve frames out. Iterate
+ * for `ready`, `frames`, `flushed` and `error` messages. */
+export class LipsyncStream extends RealtimeSession {
+  /** One binary frame of 16-bit little-endian mono PCM at the stream's rate. */
+  audio(pcm) {
+    const bytes = pcm instanceof Uint8Array ? pcm : pcm instanceof ArrayBuffer ? new Uint8Array(pcm) : null;
+    if (!bytes || bytes.length === 0 || bytes.length % 2 || bytes.length > 196608) throw new Error('PCM frame must hold 1–98304 signed 16-bit samples');
+    return this.ready.then(() => {
+      if (this.closed || this.socket.readyState !== 1) throw new Error('Lipsync socket is not open');
+      this.socket.send(bytes);
+    });
+  }
+  /** End an utterance: the remaining frames arrive, then `flushed`. */
+  flush() { return this.send('flush'); }
 }
 export const speechStart = (turnId, text) => ({ turn_id: turnId, codec: 'pcm_s16le', sample_rate: 24000, channels: 1, ...(text === undefined ? {} : { text }) });
 export function speechAppend(turnId, seq, startSample, pcm) {

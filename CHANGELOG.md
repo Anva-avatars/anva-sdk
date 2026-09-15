@@ -7,6 +7,26 @@ Release steps are in RELEASING.md.
 
 ## Unreleased
 
+## 0.5.0 — 2026-09-15
+
+- `speech_input` / `speechInput` / `SpeechInput` on session creation: `"off"`
+  for hosts that transcribe the user themselves (push-to-talk). The embed opens
+  no microphone; send each user turn with `send_message` / `sendMessage` /
+  `SendMessage`.
+- Host lines for `byo_llm`: REST `say` / `Say`, and realtime `say`,
+  `say_delta` / `sayDelta` / `SayDelta` and `say_done` / `sayDone` / `SayDone`.
+  The line's `turn.complete` event carries its `say_id`.
+- Waiting for the viewer: the events socket reports `session.live` once the
+  viewer's embed is connected, and refuses commands before it. JS
+  `RealtimeSession.live` (a promise), Python `RealtimeSession.wait_live()` and
+  Go `Realtime.WaitLive()`. Requires a deployment where the events socket no
+  longer starts sessions (anva.ai from this release).
+- Lipsync API (Enterprise): `lipsync()` / `Lipsync()` for a clip;
+  `connect_lipsync()` / `connectLipsync()` and Go `NewLipsyncStream` with
+  `LipsyncStreamURL` for streaming PCM.
+- JS types: `AvatarInfo` with `icon_url` and `icon_expires_at`, `LipsyncResult`,
+  `LipsyncStream`.
+
 ## 0.4.0 — 2026-09-12
 
 - Realtime connections authenticate with an `Authorization` header instead of

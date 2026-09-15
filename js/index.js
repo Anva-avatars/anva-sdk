@@ -11,8 +11,8 @@
  * embed_url to the client.
  */
 
-import { RealtimeSession, speechStart, speechAppend } from "./realtime.js";
-export { RealtimeSession } from "./realtime.js";
+import { RealtimeSession, LipsyncStream, speechStart, speechAppend } from "./realtime.js";
+export { RealtimeSession, LipsyncStream } from "./realtime.js";
 
 const DEFAULT_BASE_URL = "https://anva.ai";
 let warnedEventsUrl = false;
@@ -55,13 +55,17 @@ export class Anva {
    * up to 20 keys, 4 KB serialized) stored with the session and echoed on
    * the session, on `session.info`, and in every webhook payload.
    *
+   * `speechInput: "off"` (byo_llm, anva_light, anva_expressive) is for hosts
+   * that transcribe the user themselves, such as push-to-talk: the embed opens
+   * no microphone and each user turn arrives through `sendMessage`.
+   *
    * @param {{presetId?: string, avatarId?: string, systemPrompt?: string,
    *   voiceId?: string, languageCode?: string, llmMode?: string,
    *   webhookUrl?: string, webhookSecret?: string, maxDurationSeconds?: number,
-   *   metadata?: Record<string, string | number | boolean>}} params
+   *   metadata?: Record<string, string | number | boolean>, speechInput?: "on" | "off"}} params
    */
   createSession(params = {}) {
-    const { presetId, avatarId, systemPrompt, voiceId, languageCode, llmMode, serviceMode, performanceOptions, conversationProvider, performanceMode, elevenlabsAgentId, dynamicExpressions, webhookUrl, webhookSecret, maxDurationSeconds, metadata } = params;
+    const { presetId, avatarId, systemPrompt, voiceId, languageCode, llmMode, serviceMode, performanceOptions, conversationProvider, performanceMode, elevenlabsAgentId, dynamicExpressions, webhookUrl, webhookSecret, maxDurationSeconds, metadata, speechInput } = params;
     if ((!presetId && !avatarId) || (presetId && avatarId)) {
       throw new Error("createSession requires exactly one of presetId or avatarId");
     }
@@ -82,6 +86,7 @@ export class Anva {
     if (webhookSecret) body.webhook_secret = webhookSecret;
     if (maxDurationSeconds !== undefined) body.max_duration_seconds = maxDurationSeconds;
     if (metadata !== undefined) body.metadata = metadata;
+    if (speechInput !== undefined) body.speech_input = speechInput;
     return this._request("POST", "/api/v2/sessions", body);
   }
 
@@ -97,6 +102,15 @@ export class Anva {
    * NOT speak `text` verbatim). For external replies, use serviceMode:"byo_llm" and turnDelta/turnDone on a realtime connection. */
   sendMessage(sessionId, text) {
     return this._request("POST", `/api/v2/sessions/${enc(sessionId)}/messages`, { text });
+  }
+
+  /** Speak `text` verbatim in the session voice (byo_llm), without a
+   * turn.request. Resolves with `{status, say_id}`; the line's `turn.complete`
+   * event carries the same `say_id`. Needs the viewer connected. */
+  say(sessionId, text, { sayId } = {}) {
+    const body = { text };
+    if (sayId) body.say_id = sayId;
+    return this._request("POST", `/api/v2/sessions/${enc(sessionId)}/say`, body);
   }
 
   /** Stop the avatar mid-sentence. */
@@ -142,6 +156,30 @@ export class Anva {
   async *events(sessionId, options = {}) {
     const stream = await this.connect(sessionId, options);
     try { yield* stream; } finally { stream.close(); }
+  }
+  /** Mouth curves for one audio clip (Enterprise): the 24 ARKit mouth
+   * channels at 30 fps. `audio` (Uint8Array, ArrayBuffer or Blob) is WAV, FLAC
+   * or OGG, or raw 16-bit little-endian mono PCM when `sampleRate` is given. */
+  lipsync(audio, { sampleRate, preset, contentType } = {}) {
+    const query = new URLSearchParams();
+    if (sampleRate !== undefined) query.set("sample_rate", String(sampleRate));
+    if (preset) query.set("preset", preset);
+    const qs = query.toString();
+    const type = contentType || (sampleRate !== undefined ? "audio/pcm" : "application/octet-stream");
+    return this._request("POST", `/api/v2/lipsync${qs ? `?${qs}` : ""}`, audio, type);
+  }
+  /** The Lipsync stream's WebSocket URL; authenticate with `authHeaders()`. */
+  lipsyncStreamUrl({ sampleRate = 24000, preset } = {}) {
+    const query = new URLSearchParams({ sample_rate: String(sampleRate) });
+    if (preset) query.set("preset", preset);
+    return `${this.baseUrl.replace(/^http/, "ws")}/api/v2/lipsync/stream?${query}`;
+  }
+  /** Stream 16 or 24 kHz PCM in and mouth curves out (Enterprise). */
+  async connectLipsync({ sampleRate = 24000, preset, WebSocketImpl } = {}) {
+    const WS = WebSocketImpl || globalThis.WebSocket;
+    if (!WS) throw new Error('No WebSocket implementation; pass { WebSocketImpl }');
+    const stream = new LipsyncStream(new WS(this.lipsyncStreamUrl({ sampleRate, preset }), { headers: this.authHeaders() }));
+    try { await stream.ready; return stream; } catch (error) { stream.close(); throw error; }
   }
   capabilities() { return this._request('GET', '/api/v2/capabilities'); }
   billing() { return this._request('GET', '/api/v2/billing'); }
@@ -191,15 +229,15 @@ export class Anva {
 
   // -- plumbing -------------------------------------------------------------
 
-  async _request(method, path, body) {
+  async _request(method, path, body, rawType) {
     const res = await fetch(this.baseUrl + path, {
       method,
       headers: {
         Authorization: `Bearer ${this.apiKey}`,
-        "Content-Type": "application/json",
-        "User-Agent": "anva-js/0.4.0",
+        "Content-Type": rawType || "application/json",
+        "User-Agent": "anva-js/0.5.0",
       },
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: body === undefined ? undefined : rawType ? body : JSON.stringify(body),
     });
     const raw = await res.text();
     let payload = {};

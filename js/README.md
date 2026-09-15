@@ -1,6 +1,6 @@
 # anva-sdk — JavaScript / TypeScript
 
-Install with `npm install anva-sdk@0.4.0`. REST uses Node 18+'s fetch. Realtime needs
+Install with `npm install anva-sdk@0.5.0`. REST uses Node 18+'s fetch. Realtime needs
 Node 22+'s WebSocket or an injected compatible constructor.
 
 ```js
@@ -12,6 +12,7 @@ const session = await client.createSession({
 });
 // Attach session.embed_url in your browser.
 const stream = await client.connect(session.session_id);
+await stream.live; // the viewer's embed is connected
 try {
   for await (const event of stream) {
     if (event.type === "turn.request") {
@@ -34,6 +35,8 @@ and sockets server-side. `AnvaError` exposes `status`, `code`, and `details`;
 command errors arrive as structured events. Never log authenticated event URLs.
 
 All five canonical modes, capability/billing discovery, REST interrupt,
-presentation and PCM methods are typed in `index.d.ts`. Read the repository
+presentation, PCM, push-to-talk (`speechInput`), host lines (`say`, `sayDelta`,
+`sayDone`) and Lipsync API (`lipsync`, `connectLipsync`) methods are typed in
+`index.d.ts`. Read the repository
 README for mode availability and flow-control requirements. Preset updates use
 the REST API's snake_case patch fields.

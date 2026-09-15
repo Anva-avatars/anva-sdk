@@ -5,7 +5,7 @@ import types
 import unittest
 import urllib.error
 from unittest.mock import patch
-from anva import Anva, AnvaError, RealtimeSession
+from anva import Anva, AnvaError, LipsyncStream, RealtimeSession
 
 class Response:
     def __init__(self, body): self.body = body
@@ -21,7 +21,9 @@ class ClientTests(unittest.TestCase):
     def setUp(self): self.client=Anva('fixture-key',base_url='https://fixture.invalid');self.requests=[]
     def open(self, req, timeout):
         self.requests.append(req)
-        return Response({'session_id':'s','service_mode':json.loads(req.data or b'{}').get('service_mode')})
+        try: sent=json.loads(req.data or b'{}')
+        except ValueError: sent={}
+        return Response({'session_id':'s','service_mode':sent.get('service_mode'),'say_id':'say_1'})
     def body(self): return json.loads(self.requests[-1].data)
     def test_modes_and_canonical_preset(self):
         with patch('urllib.request.urlopen', self.open):
@@ -68,4 +70,47 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(uri,'wss://fixture.invalid/api/v2/sessions/s/events')
         self.assertEqual(kw['additional_headers'],{'Authorization':'Bearer fixture-key'})
         with self.assertWarns(DeprecationWarning):self.assertTrue(self.client.events_url('s').endswith('?api_key=fixture-key'))
+    def test_speech_input_say_and_lipsync_clip(self):
+        with patch('urllib.request.urlopen',self.open):
+            self.client.create_session(avatar_id='a',service_mode='byo_llm',speech_input='off');self.assertEqual(self.body()['speech_input'],'off')
+            self.assertEqual(self.client.say('s','Welcome.',say_id='lesson-3')['say_id'],'say_1')
+            self.assertTrue(self.requests[-1].full_url.endswith('/api/v2/sessions/s/say'));self.assertEqual(self.body(),{'text':'Welcome.','say_id':'lesson-3'})
+            self.client.lipsync(b'\x01\x02',sample_rate=16000,preset='lowlat');req=self.requests[-1]
+            self.assertEqual(req.full_url,'https://fixture.invalid/api/v2/lipsync?sample_rate=16000&preset=lowlat')
+            self.assertEqual(req.data,b'\x01\x02');self.assertEqual(req.get_header('Content-type'),'audio/pcm')
+            self.client.lipsync(b'RIFF');self.assertEqual(self.requests[-1].full_url,'https://fixture.invalid/api/v2/lipsync')
+            self.assertEqual(self.requests[-1].get_header('Content-type'),'application/octet-stream')
+        self.assertEqual(self.client.lipsync_stream_url(sample_rate=16000),'wss://fixture.invalid/api/v2/lipsync/stream?sample_rate=16000')
+    def test_host_lines_wait_for_the_viewer(self):
+        class LiveSocket(Socket):
+            def __init__(self):
+                super().__init__()
+                self.frames=iter([json.dumps({"type":"session.info","payload":{"status":"pending"}}),json.dumps({"type":"session.live","payload":{"status":"active"}}),json.dumps({"type":"transcript","payload":{"role":"assistant"}})])
+            def __iter__(self): return self.frames
+        socket=LiveSocket()
+        with RealtimeSession(socket) as stream:
+            self.assertEqual(stream.wait_live()['status'],'active')
+            stream.say('Welcome.',say_id='lesson-3');stream.say_delta('hint','Try ');stream.say_done('hint')
+            self.assertEqual([e['type'] for e in stream],['session.info','session.live','transcript'])
+        self.assertEqual(socket.sent,[{'type':'say','payload':{'text':'Welcome.','say_id':'lesson-3'}},{'type':'say.delta','payload':{'say_id':'hint','text':'Try '}},{'type':'say.done','payload':{'say_id':'hint'}}])
+        ended=LiveSocket();ended.frames=iter([json.dumps({"type":"session.ended","payload":{"reason":"expired"}})])
+        with self.assertRaises(RuntimeError):RealtimeSession(ended).wait_live()
+    def test_lipsync_stream_sends_binary_pcm(self):
+        class RawSocket:
+            def __init__(self): self.sent=[]; self.closed=False
+            def send(self, data): self.sent.append(data)
+            def close(self): self.closed=True
+            def __iter__(self): return iter([json.dumps({"type":"ready","fps":30,"delay_ms":133})])
+        socket=RawSocket()
+        with LipsyncStream(socket) as stream:
+            self.assertEqual(next(iter(stream))['delay_ms'],133)
+            stream.audio(b'\x01\x02');stream.flush()
+            with self.assertRaises(ValueError):stream.audio(b'\x01')
+        self.assertEqual(socket.sent,[b'\x01\x02','{"type": "flush"}']);self.assertTrue(socket.closed)
+        calls=[];client_mod=types.ModuleType('websockets.sync.client')
+        client_mod.connect=lambda uri,**kw:calls.append((uri,kw)) or RawSocket()
+        modules={'websockets':types.ModuleType('websockets'),'websockets.sync':types.ModuleType('websockets.sync'),'websockets.sync.client':client_mod}
+        with patch.dict(sys.modules,modules):self.client.connect_lipsync(sample_rate=16000)
+        self.assertEqual(calls[0][0],'wss://fixture.invalid/api/v2/lipsync/stream?sample_rate=16000')
+        self.assertEqual(calls[0][1]['additional_headers'],{'Authorization':'Bearer fixture-key'})
 if __name__=='__main__': unittest.main()

@@ -13,7 +13,7 @@ import urllib.request
 import warnings
 from typing import Any, Dict, Iterator, Optional
 
-from .realtime import RealtimeSession, speech_start, speech_append
+from .realtime import LipsyncStream, RealtimeSession, speech_start, speech_append
 
 DEFAULT_BASE_URL = "https://anva.ai"
 
@@ -60,6 +60,7 @@ class Anva:
                        performance_mode: Optional[str] = None,
                        elevenlabs_agent_id: Optional[str] = None,
                        dynamic_expressions: Optional[bool] = None,
+                       speech_input: Optional[str] = None,
                        webhook_url: Optional[str] = None,
                        webhook_secret: Optional[str] = None,
                        max_duration_seconds: Optional[int] = None,
@@ -76,6 +77,11 @@ class Anva:
         ``metadata`` is an optional flat dict (str, int, float or bool values,
         up to 20 keys, 4 KB serialized) stored with the session and echoed on
         the session, on ``session.info`` and in every webhook payload.
+
+        ``speech_input="off"`` (byo_llm, anva_light, anva_expressive) is for
+        hosts that transcribe the user themselves, such as push-to-talk: the
+        embed opens no microphone and each user turn arrives through
+        ``send_message``.
 
         Returns session_id, session_token, embed_url (iframe-ready),
         events_ws_url, instance_id, preset_id, avatar_id, max_duration_seconds.
@@ -96,7 +102,7 @@ class Anva:
         for key, value in {"service_mode": service_mode, "llm_mode": llm_mode,
                            "performance_options": performance_options, "conversation_provider": conversation_provider,
                            "performance_mode": performance_mode, "elevenlabs_agent_id": elevenlabs_agent_id,
-                           "dynamic_expressions": dynamic_expressions}.items():
+                           "dynamic_expressions": dynamic_expressions, "speech_input": speech_input}.items():
             if value is not None:
                 body[key] = value
         if webhook_url:
@@ -122,6 +128,16 @@ class Anva:
         return self._request(
             "POST", f"/api/v2/sessions/{_esc(session_id)}/messages",
             {"text": text})
+
+    def say(self, session_id: str, text: str, *, say_id: Optional[str] = None) -> Dict[str, Any]:
+        """Speak ``text`` verbatim in the session voice (byo_llm), without a
+        turn.request. Returns ``{"status", "say_id"}``; the line's
+        ``turn.complete`` event carries the same ``say_id``. Needs the viewer
+        connected."""
+        body: Dict[str, Any] = {"text": text}
+        if say_id:
+            body["say_id"] = say_id
+        return self._request("POST", f"/api/v2/sessions/{_esc(session_id)}/say", body)
 
     def interrupt(self, session_id: str) -> Dict[str, Any]:
         """Stop the avatar mid-sentence."""
@@ -162,6 +178,40 @@ class Anva:
     def events(self, session_id: str) -> Iterator[Dict[str, Any]]:
         with self.connect(session_id) as stream:
             yield from stream
+
+    def lipsync(self, audio: bytes, *, sample_rate: Optional[int] = None,
+                preset: Optional[str] = None,
+                content_type: Optional[str] = None) -> Dict[str, Any]:
+        """Mouth curves for one audio clip (Enterprise): the 24 ARKit mouth
+        channels at 30 fps. ``audio`` is WAV, FLAC or OGG bytes, or raw 16-bit
+        little-endian mono PCM when ``sample_rate`` is given."""
+        query: Dict[str, str] = {}
+        if sample_rate is not None:
+            query["sample_rate"] = str(sample_rate)
+        if preset:
+            query["preset"] = preset
+        path = "/api/v2/lipsync" + ("?" + urllib.parse.urlencode(query) if query else "")
+        kind = content_type or ("audio/pcm" if sample_rate is not None else "application/octet-stream")
+        return self._request("POST", path, raw=bytes(audio), content_type=kind)
+
+    def lipsync_stream_url(self, *, sample_rate: int = 24000, preset: Optional[str] = None) -> str:
+        """The Lipsync stream's WebSocket URL; authenticate with ``auth_headers()``."""
+        query = {"sample_rate": str(sample_rate)}
+        if preset:
+            query["preset"] = preset
+        ws_base = self.base_url.replace("http", "ws", 1)
+        return f"{ws_base}/api/v2/lipsync/stream?{urllib.parse.urlencode(query)}"
+
+    def connect_lipsync(self, *, sample_rate: int = 24000,
+                        preset: Optional[str] = None) -> LipsyncStream:
+        """Stream 16 or 24 kHz PCM in and mouth curves out (Enterprise).
+        Requires ``pip install anva[ws]``."""
+        try:
+            from websockets.sync.client import connect
+        except ImportError as e:
+            raise RuntimeError("realtime requires pip install anva[ws]") from e
+        return LipsyncStream(connect(self.lipsync_stream_url(sample_rate=sample_rate, preset=preset),
+                                     additional_headers=self.auth_headers()))
 
     def capabilities(self) -> Dict[str, Any]:
         return self._request("GET", "/api/v2/capabilities")
@@ -238,14 +288,16 @@ class Anva:
     # -- plumbing -----------------------------------------------------------
 
     def _request(self, method: str, path: str,
-                 body: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        data = json.dumps(body).encode() if body is not None else None
+                 body: Optional[Dict[str, Any]] = None, *,
+                 raw: Optional[bytes] = None,
+                 content_type: str = "application/json") -> Dict[str, Any]:
+        data = raw if raw is not None else (json.dumps(body).encode() if body is not None else None)
         req = urllib.request.Request(
             self.base_url + path, data=data, method=method,
             headers={
                 "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-                "User-Agent": "anva-python/0.4.0",
+                "Content-Type": content_type,
+                "User-Agent": "anva-python/0.5.0",
             })
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:

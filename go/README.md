@@ -2,7 +2,7 @@
 
 Standard-library REST client and a bidirectional wrapper for your chosen
 WebSocket library. Install with
-`go get github.com/Anva-avatars/anva-sdk/go@v0.4.0`.
+`go get github.com/Anva-avatars/anva-sdk/go@v0.5.0`.
 
 ```go
 import (
@@ -38,6 +38,14 @@ Speech uses `StartSpeech(turnID, text)`,
 Raw PCM must be signed16 little-endian, 24kHz mono. Chunks are at most 24,000 bytes;
 observe `speech.state` and bound unplayed audio to five seconds. Closing the
 control socket does not end a session; call `EndSession` when finished.
+
+The events socket never starts a session; call `stream.WaitLive()` before
+sending commands. `CreateSessionParams.SpeechInput = "off"` suits hosts that
+transcribe the user themselves (push-to-talk). `Client.Say` and
+`Realtime.Say` / `SayDelta` / `SayDone` speak lines of your own (BYOLLM).
+`Client.Lipsync` returns a clip's mouth curves; stream with
+`NewLipsyncStream(socket)` dialled at `client.LipsyncStreamURL(16000, "")` with
+`client.AuthHeader()` (Enterprise).
 
 Errors are `*anva.Error` with `Status`, `Code`, `Message`. See the repository
 README for protocol details.

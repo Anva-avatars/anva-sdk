@@ -78,8 +78,12 @@ type CreateSessionParams struct {
 	PerformanceMode      string         `json:"performance_mode,omitempty"`
 	ElevenLabsAgentID    string         `json:"elevenlabs_agent_id,omitempty"`
 	DynamicExpressions   *bool          `json:"dynamic_expressions,omitempty"`
-	WebhookURL           string         `json:"webhook_url,omitempty"`
-	WebhookSecret        string         `json:"webhook_secret,omitempty"`
+	// SpeechInput "off" (BYOLLM, AnvaLight, AnvaExpressive) is for hosts that
+	// transcribe the user themselves, such as push-to-talk: the embed opens no
+	// microphone and each user turn arrives through SendMessage.
+	SpeechInput   string `json:"speech_input,omitempty"`
+	WebhookURL    string `json:"webhook_url,omitempty"`
+	WebhookSecret string `json:"webhook_secret,omitempty"`
 	// MaxDurationSeconds (60–7200) ends the session that long after it goes
 	// live; 0 applies the server's 2-hour ceiling.
 	MaxDurationSeconds int `json:"max_duration_seconds,omitempty"`
@@ -99,13 +103,14 @@ type Session struct {
 	LLMMode      string         `json:"llm_mode"`
 	ServiceMode  ServiceMode    `json:"service_mode"`
 	Billing      map[string]any `json:"billing"`
+	SpeechInput  string         `json:"speech_input"`
 	ExpiresAt    string         `json:"expires_at"`
 	// MaxDurationSeconds is how long the session may stay live once connected.
-	MaxDurationSeconds int    `json:"max_duration_seconds"`
+	MaxDurationSeconds int `json:"max_duration_seconds"`
 	// Metadata echoes the map passed at creation, if any.
-	Metadata map[string]any `json:"metadata,omitempty"`
-	EmbedURL           string `json:"embed_url"`
-	EventsWSURL        string `json:"events_ws_url"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
+	EmbedURL    string         `json:"embed_url"`
+	EventsWSURL string         `json:"events_ws_url"`
 }
 
 // Preset mirrors the public preset resource.
@@ -174,6 +179,22 @@ func (c *Client) TriggerAction(ctx context.Context, sessionID, name string) erro
 	return c.do(ctx, http.MethodPost, "/api/v2/sessions/"+esc(sessionID)+"/actions", body, nil)
 }
 
+// Say speaks text verbatim in the session voice (BYOLLM), without a
+// turn.request, and returns the line's say_id (generated when sayID is empty).
+// The line's turn.complete event carries the same say_id. The viewer's embed
+// must be connected.
+func (c *Client) Say(ctx context.Context, sessionID, text, sayID string) (string, error) {
+	body := map[string]string{"text": text}
+	if sayID != "" {
+		body["say_id"] = sayID
+	}
+	var out struct {
+		SayID string `json:"say_id"`
+	}
+	err := c.do(ctx, http.MethodPost, "/api/v2/sessions/"+esc(sessionID)+"/say", body, &out)
+	return out.SayID, err
+}
+
 // EventsWSURL is the WebSocket URL for the session's live event stream
 // (transcripts, state changes). It carries no credentials; send AuthHeader
 // with the handshake, e.g.
@@ -237,13 +258,19 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 		}
 		reader = bytes.NewReader(raw)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, c.BaseURL+path, reader)
+	return c.send(ctx, method, path, "application/json", reader, out)
+}
+
+// send performs one request with a body of the given content type and decodes
+// a JSON reply into out.
+func (c *Client) send(ctx context.Context, method, path, contentType string, body io.Reader, out any) error {
+	req, err := http.NewRequestWithContext(ctx, method, c.BaseURL+path, body)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.APIKey)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "anva-go/0.4.0")
+	req.Header.Set("Content-Type", contentType)
+	req.Header.Set("User-Agent", "anva-go/0.5.0")
 	httpc := c.HTTPClient
 	if httpc == nil {
 		httpc = http.DefaultClient
@@ -253,7 +280,7 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 		return err
 	}
 	defer resp.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
 	if err != nil {
 		return err
 	}

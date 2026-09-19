@@ -7,6 +7,15 @@ Release steps are in RELEASING.md.
 
 ## Unreleased
 
+- New framework packages under `integrations/`, versioned on their own:
+  `livekit-plugins-anva` 0.1.0 (LiveKit Agents `AvatarSession`: Anva joins the
+  room as an avatar participant, following LiveKit's avatar protocol) and
+  `pipecat-anva` 0.1.0 (Pipecat `AnvaVideoService`: a lip-synced avatar for
+  the pipeline's TTS on any transport, Daily included). Both need an Anva
+  deployment with LiveKit room support (anva.ai from the release that ships
+  `livekit: {url, token}` on session creation) for the LiveKit package; the
+  Pipecat package works with every deployment that offers `avatar_only`.
+
 ## 0.5.0 — 2026-09-15
 
 - `speech_input` / `speechInput` / `SpeechInput` on session creation: `"off"`

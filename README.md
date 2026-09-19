@@ -15,6 +15,20 @@ Install SDK **0.5.0**:
 The production base defaults to `https://anva.ai`. Set `base_url`, `baseUrl`, or
 `Client.BaseURL` to your updated deployment for local integration.
 
+## Voice-agent frameworks
+
+Agents on LiveKit Agents or Pipecat (including Daily) keep their own STT, LLM
+and TTS and get an Anva face from a framework package, under
+[`integrations/`](integrations/):
+
+| Framework | Install | Use |
+|---|---|---|
+| LiveKit Agents | `pip install livekit-plugins-anva` | `avatar = anva.AvatarSession(avatar_id="av_..."); await avatar.start(session, room=ctx.room)` |
+| Pipecat / Daily | `pip install pipecat-anva` | `AnvaVideoService(api_key=..., avatar_id="av_...")` after the TTS in the pipeline |
+
+Both run an `avatar_only` session (10 tokens per connected minute, Developer
+plan or above). Each package has its own README and version.
+
 ## Modes
 
 Select `service_mode` at creation. Python uses `service_mode`, JS

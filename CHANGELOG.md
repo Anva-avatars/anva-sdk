@@ -7,6 +7,12 @@ Release steps are in RELEASING.md.
 
 ## Unreleased
 
+## Integrations — 2026-09-20
+
+- Published to PyPI: `pip install livekit-plugins-anva` and
+  `pip install pipecat-anva`. Both verified against production anva.ai — the
+  avatar joins a real LiveKit Cloud room and speaks the agent's words, and the
+  Pipecat service returns the avatar's video and voice into the pipeline.
 - New framework packages under `integrations/`, versioned on their own:
   `livekit-plugins-anva` 0.1.0 (LiveKit Agents `AvatarSession`: Anva joins the
   room as an avatar participant, following LiveKit's avatar protocol) and

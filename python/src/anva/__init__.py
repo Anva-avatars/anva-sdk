@@ -4,4 +4,4 @@ from .realtime import LipsyncStream, RealtimeSession
 
 __all__ = ["Anva", "AnvaError", "LipsyncStream", "RealtimeSession"]
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"

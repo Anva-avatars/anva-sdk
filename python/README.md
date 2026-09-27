@@ -1,6 +1,6 @@
 # anva — Python SDK
 
-Install with `pip install "anva[ws]==0.5.0"`.
+Install with `pip install "anva[ws]==0.6.0"`.
 The REST client uses the standard library. Realtime uses `websockets`' sync API.
 
 ```python
@@ -31,7 +31,11 @@ and `details`. Realtime command failures remain structured events.
 
 `create_session(speech_input="off")` suits hosts that transcribe the user
 themselves (push-to-talk); `say` / `say_delta` / `say_done` speak lines of your
-own; `lipsync()` and `connect_lipsync()` reach the Enterprise Lipsync API.
+own (`speed=` sets a line's rate); `update_session(id, system_prompt=...)` and
+`update_prompt` on a connection change a managed session's instructions
+mid-call; `create_session(..., idempotency_key=...)` makes a retried create
+return the first session; `connect(id, controls=False)` leaves out the face
+stream; `lipsync()` and `connect_lipsync()` reach the Enterprise Lipsync API.
 
 All five service modes are supported as request values, subject to deployment
 capabilities. PCM methods accept `bytes`, `bytearray` or byte-oriented `memoryview`:

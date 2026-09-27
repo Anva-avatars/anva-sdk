@@ -84,3 +84,30 @@ test('a lipsync stream sends binary PCM and flush commands',async()=>{
  socket.emit({type:'frames',start:0,values:[[0.5]]});
  for await(const message of stream){assert.equal(message.values[0][0],0.5);break;}
 });
+test('speaking rate and wake-up reach session creation',async()=>{
+ await client.createSession({avatarId:'a',speechSpeed:0.85,wakeUp:true});
+ assert.equal(requests.at(-1).body.speech_speed,0.85);assert.equal(requests.at(-1).body.wake_up,true);
+ await client.createSession({avatarId:'a'});
+ assert.equal('wake_up' in requests.at(-1).body,false);
+});
+test('retry-safe creates, per-line speed, live instructions and a controls-free socket',async()=>{
+ await client.createSession({avatarId:'a',idempotencyKey:'portrait-request-0001'});
+ assert.equal(requests.at(-1).options.headers['Idempotency-Key'],'portrait-request-0001');
+ await client.createSession({avatarId:'a'});
+ assert.equal('Idempotency-Key' in requests.at(-1).options.headers,false);
+ await client.say('s','Slowly now.',{sayId:'l1',speed:0.8});
+ assert.deepEqual(requests.at(-1).body,{text:'Slowly now.',say_id:'l1',speed:0.8});
+ await client.updateSession('s',{systemPrompt:'The learner is a beginner.'});
+ assert.equal(requests.at(-1).options.method,'PATCH');assert.match(requests.at(-1).url,/\/api\/v2\/sessions\/s$/);
+ assert.deepEqual(requests.at(-1).body,{system_prompt:'The learner is a beginner.'});
+ assert.match(client.eventsWsUrl('s',{controls:false}),/\/events\?controls=false$/);
+ assert.match(client.eventsWsUrl('s'),/\/events$/);
+});
+test('socket lines carry speed, instructions change live, and controls can be left out',async()=>{
+ const stream=await client.connect('s',{WebSocketImpl:FakeWS,controls:false});const socket=FakeWS.sockets.at(-1);
+ assert.equal(socket.url,'wss://fixture.invalid/api/v2/sessions/s/events?controls=false');
+ socket.emit({type:'session.live',payload:{status:'active'}});await stream.live;
+ await stream.say('Slowly.','a',{speed:0.8});await stream.sayDelta('b','Try ',{speed:0.9});await stream.updatePrompt('Speak slowly.');
+ assert.deepEqual(socket.sent,[{type:'say',payload:{text:'Slowly.',say_id:'a',speed:0.8}},{type:'say.delta',payload:{say_id:'b',text:'Try ',speed:0.9}},{type:'session.update',payload:{system_prompt:'Speak slowly.'}}]);
+ stream.close();
+});

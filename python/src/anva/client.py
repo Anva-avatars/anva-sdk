@@ -61,6 +61,9 @@ class Anva:
                        elevenlabs_agent_id: Optional[str] = None,
                        dynamic_expressions: Optional[bool] = None,
                        speech_input: Optional[str] = None,
+                       speech_speed: Optional[float] = None,
+                       wake_up: Optional[bool] = None,
+                       idempotency_key: Optional[str] = None,
                        webhook_url: Optional[str] = None,
                        webhook_secret: Optional[str] = None,
                        max_duration_seconds: Optional[int] = None,
@@ -83,6 +86,16 @@ class Anva:
         embed opens no microphone and each user turn arrives through
         ``send_message``.
 
+        ``speech_speed`` (0.7–1.2) sets the speaking rate for anva_light and
+        byo_llm voices. ``wake_up=True`` starts the call with the avatar's
+        eyes closed; they open once the viewer's video is showing
+        (``session.info`` reports ``wake_up: false`` for avatars that cannot
+        close their eyes convincingly).
+
+        ``idempotency_key`` (16–128 letters, digits, ``-`` or ``_``) is sent as
+        the ``Idempotency-Key`` header: a retry with the same key and body
+        within 24 hours returns the first session instead of a second one.
+
         Returns session_id, session_token, embed_url (iframe-ready),
         events_ws_url, instance_id, preset_id, avatar_id, max_duration_seconds.
         """
@@ -102,7 +115,8 @@ class Anva:
         for key, value in {"service_mode": service_mode, "llm_mode": llm_mode,
                            "performance_options": performance_options, "conversation_provider": conversation_provider,
                            "performance_mode": performance_mode, "elevenlabs_agent_id": elevenlabs_agent_id,
-                           "dynamic_expressions": dynamic_expressions, "speech_input": speech_input}.items():
+                           "dynamic_expressions": dynamic_expressions, "speech_input": speech_input,
+                           "speech_speed": speech_speed, "wake_up": wake_up}.items():
             if value is not None:
                 body[key] = value
         if webhook_url:
@@ -113,13 +127,22 @@ class Anva:
             body["max_duration_seconds"] = max_duration_seconds
         if metadata is not None:
             body["metadata"] = metadata
-        return self._request("POST", "/api/v2/sessions", body)
+        headers = {"Idempotency-Key": idempotency_key} if idempotency_key else None
+        return self._request("POST", "/api/v2/sessions", body, headers=headers)
 
     def get_session(self, session_id: str) -> Dict[str, Any]:
         return self._request("GET", f"/api/v2/sessions/{_esc(session_id)}")
 
     def end_session(self, session_id: str) -> Dict[str, Any]:
         return self._request("DELETE", f"/api/v2/sessions/{_esc(session_id)}")
+
+    def update_session(self, session_id: str, *, system_prompt: str) -> Dict[str, Any]:
+        """Replace a managed session's instructions while it runs; they apply
+        from the next reply (anva_light, anva_expressive; added as context for
+        elevenagents_max). On a live connection, ``update_prompt`` does the
+        same."""
+        return self._request("PATCH", f"/api/v2/sessions/{_esc(session_id)}",
+                             {"system_prompt": system_prompt})
 
     def send_message(self, session_id: str, text: str) -> Dict[str, Any]:
         """Send ``text`` as a user message; the avatar hears it and replies (it
@@ -129,14 +152,18 @@ class Anva:
             "POST", f"/api/v2/sessions/{_esc(session_id)}/messages",
             {"text": text})
 
-    def say(self, session_id: str, text: str, *, say_id: Optional[str] = None) -> Dict[str, Any]:
+    def say(self, session_id: str, text: str, *, say_id: Optional[str] = None,
+            speed: Optional[float] = None) -> Dict[str, Any]:
         """Speak ``text`` verbatim in the session voice (byo_llm), without a
         turn.request. Returns ``{"status", "say_id"}``; the line's
-        ``turn.complete`` event carries the same ``say_id``. Needs the viewer
-        connected."""
+        ``turn.complete`` event carries the same ``say_id`` and it ends with
+        one ``line.ended``. ``speed`` (0.7–1.2) sets this line's speaking
+        rate. Needs the viewer connected."""
         body: Dict[str, Any] = {"text": text}
         if say_id:
             body["say_id"] = say_id
+        if speed is not None:
+            body["speed"] = speed
         return self._request("POST", f"/api/v2/sessions/{_esc(session_id)}/say", body)
 
     def interrupt(self, session_id: str) -> Dict[str, Any]:
@@ -149,11 +176,12 @@ class Anva:
             "POST", f"/api/v2/sessions/{_esc(session_id)}/actions",
             {"name": name})
 
-    def events_ws_url(self, session_id: str) -> str:
+    def events_ws_url(self, session_id: str, *, controls: bool = True) -> str:
         """The session's event-stream WebSocket URL. It carries no credentials:
-        authenticate the handshake with ``auth_headers()``."""
+        authenticate the handshake with ``auth_headers()``. ``controls=False``
+        leaves out the per-frame face stream."""
         ws_base = self.base_url.replace("http", "ws", 1)
-        return f"{ws_base}/api/v2/sessions/{_esc(session_id)}/events"
+        return f"{ws_base}/api/v2/sessions/{_esc(session_id)}/events" + ("" if controls else "?controls=false")
 
     def auth_headers(self) -> Dict[str, str]:
         return {"Authorization": f"Bearer {self.api_key}"}
@@ -166,17 +194,18 @@ class Anva:
                       DeprecationWarning, stacklevel=2)
         return f"{self.events_ws_url(session_id)}?api_key={urllib.parse.quote(self.api_key)}"
 
-    def connect(self, session_id: str) -> RealtimeSession:
-        """Open a bidirectional connection. Requires ``pip install anva[ws]``."""
+    def connect(self, session_id: str, *, controls: bool = True) -> RealtimeSession:
+        """Open a bidirectional connection. Requires ``pip install anva[ws]``.
+        ``controls=False`` leaves out the per-frame face stream."""
         try:
             from websockets.sync.client import connect
         except ImportError as e:
             raise RuntimeError("realtime requires pip install anva[ws]") from e
-        return RealtimeSession(connect(self.events_ws_url(session_id),
+        return RealtimeSession(connect(self.events_ws_url(session_id, controls=controls),
                                        additional_headers=self.auth_headers()))
 
-    def events(self, session_id: str) -> Iterator[Dict[str, Any]]:
-        with self.connect(session_id) as stream:
+    def events(self, session_id: str, *, controls: bool = True) -> Iterator[Dict[str, Any]]:
+        with self.connect(session_id, controls=controls) as stream:
             yield from stream
 
     def lipsync(self, audio: bytes, *, sample_rate: Optional[int] = None,
@@ -290,14 +319,16 @@ class Anva:
     def _request(self, method: str, path: str,
                  body: Optional[Dict[str, Any]] = None, *,
                  raw: Optional[bytes] = None,
-                 content_type: str = "application/json") -> Dict[str, Any]:
+                 content_type: str = "application/json",
+                 headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
         data = raw if raw is not None else (json.dumps(body).encode() if body is not None else None)
         req = urllib.request.Request(
             self.base_url + path, data=data, method=method,
             headers={
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": content_type,
-                "User-Agent": "anva-python/0.5.0",
+                "User-Agent": "anva-python/0.6.0",
+                **(headers or {}),
             })
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:

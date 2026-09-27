@@ -63,8 +63,29 @@ func (r *Realtime) Say(text, sayID string) error {
 	}
 	return r.Send("say", p)
 }
+
+// SayAtSpeed is Say with this line's speaking rate (0.7–1.2).
+func (r *Realtime) SayAtSpeed(text, sayID string, speed float64) error {
+	p := map[string]any{"text": text, "speed": speed}
+	if sayID != "" {
+		p["say_id"] = sayID
+	}
+	return r.Send("say", p)
+}
 func (r *Realtime) SayDelta(sayID, text string) error {
 	return r.Send("say.delta", map[string]any{"say_id": sayID, "text": text})
+}
+
+// SayDeltaAtSpeed starts a streamed line at the given rate; put it on the
+// line's first delta.
+func (r *Realtime) SayDeltaAtSpeed(sayID, text string, speed float64) error {
+	return r.Send("say.delta", map[string]any{"say_id": sayID, "text": text, "speed": speed})
+}
+
+// UpdatePrompt replaces a managed session's instructions mid-call
+// (session.update).
+func (r *Realtime) UpdatePrompt(systemPrompt string) error {
+	return r.Send("session.update", map[string]any{"system_prompt": systemPrompt})
 }
 func (r *Realtime) SayDone(sayID string) error {
 	return r.Send("say.done", map[string]any{"say_id": sayID})

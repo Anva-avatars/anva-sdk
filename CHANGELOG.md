@@ -7,6 +7,29 @@ Release steps are in RELEASING.md.
 
 ## Unreleased
 
+## 0.6.0 — 2026-09-27
+
+- `speech_speed` / `speechSpeed` / `SpeechSpeed` on session creation: the
+  speaking rate (0.7–1.2) for anva_light and byo_llm voices.
+- `wake_up` / `wakeUp` / `WakeUp` on session creation: the call starts with the
+  avatar's eyes closed and they open once the viewer's video is showing.
+  `session.info` reports `wake_up: false` for avatars that cannot close their
+  eyes convincingly.
+- Retry-safe session creation: `idempotencyKey` / `idempotency_key` /
+  `IdempotencyKey` is sent as the `Idempotency-Key` header, so a retry with the
+  same key and body within 24 hours returns the first session.
+- Change a managed session's instructions mid-call: `updateSession` /
+  `update_session` / `UpdateSession` (`PATCH /sessions/{id}`), and
+  `updatePrompt` / `update_prompt` / `UpdatePrompt` on a realtime connection
+  (`session.update`).
+- Per-line speaking rate for host lines: `say(..., {speed})` / `say(...,
+  speed=)` / `SayAtSpeed`, on the REST call and on the socket, including the
+  first delta of a streamed line (`SayDeltaAtSpeed` in Go).
+- Events without the face stream: `connect(id, {controls: false})` /
+  `connect(id, controls=False)` / `EventsWSURL(id, WithoutControls())`.
+- TypeScript: `SessionUsage` (the `usage` on `getSession`) and `LineEnded`
+  (the `line.ended` event) types.
+
 ## Integrations — 2026-09-20
 
 - Published to PyPI: `pip install livekit-plugins-anva` and

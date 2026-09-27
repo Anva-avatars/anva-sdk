@@ -4,13 +4,13 @@ Clients for Anva's session, billing, capability and realtime-control APIs.
 API keys and authenticated sockets belong on your backend; give browsers only
 the returned `embed_url` for WebRTC audio/video.
 
-Install SDK **0.5.0**:
+Install SDK **0.6.0**:
 
 | Language | Install | Import |
 |---|---|---|
-| Python | `pip install "anva[ws]==0.5.0"` | `from anva import Anva` |
-| JavaScript / TypeScript | `npm install anva-sdk@0.5.0` | `import { Anva } from "anva-sdk"` |
-| Go | `go get github.com/Anva-avatars/anva-sdk/go@v0.5.0` | `import anva "github.com/Anva-avatars/anva-sdk/go"` |
+| Python | `pip install "anva[ws]==0.6.0"` | `from anva import Anva` |
+| JavaScript / TypeScript | `npm install anva-sdk@0.6.0` | `import { Anva } from "anva-sdk"` |
+| Go | `go get github.com/Anva-avatars/anva-sdk/go@v0.6.0` | `import anva "github.com/Anva-avatars/anva-sdk/go"` |
 
 The production base defaults to `https://anva.ai`. Set `base_url`, `baseUrl`, or
 `Client.BaseURL` to your updated deployment for local integration.
@@ -96,8 +96,9 @@ runs only while it is connected. The socket reports `session.info` at once and
 `stream.live`, Python `stream.wait_live()`, Go `stream.WaitLive()`).
 
 `connect` gives access to `message`, `interrupt`, `turnDelta`, `turnDone`,
-`turnCancel`, `say`, `sayDelta`, `sayDone`, `updateContext`, `startPresentation`,
-and PCM methods. Python has the
+`turnCancel`, `say`, `sayDelta`, `sayDone`, `updatePrompt`, `updateContext`,
+`startPresentation`, and PCM methods; `connect(id, {controls: false})` leaves
+out the per-frame face stream. Python has the
 same methods in snake_case. Go's `NewRealtime(socket)` accepts a connection
 implementing `ReadJSON`, `WriteJSON`, and `Close` (for example Gorilla WebSocket).
 The SDK does not add a Go WebSocket dependency. Only one event reader may consume
@@ -136,10 +137,15 @@ opens no microphone and no speech recognition runs; send each transcribed turn
 with `message` and answer the resulting `turn.request` as usual. A message sent
 while the avatar speaks takes the floor.
 
-`say(text, sayId?)` speaks a line of your own in the session voice without a
-`turn.request`; stream one with `sayDelta(sayId, text)` and `sayDone(sayId)`.
-The line's `turn.complete` carries its `say_id`; `interrupt()` or a new
-`say_id` stops it. REST has `say(sessionId, text, {sayId})` too.
+`say(text, sayId?, {speed?})` speaks a line of your own in the session voice
+without a `turn.request`; stream one with `sayDelta(sayId, text)` and
+`sayDone(sayId)` (put `speed`, 0.7–1.2, on the first delta). The line's
+`turn.complete` carries its `say_id`, and it ends with one `line.ended` saying
+what the viewer heard; `interrupt()` or a new `say_id` stops it. REST has
+`say(sessionId, text, {sayId, speed})` too. `updateSession(id, {systemPrompt})`
+(or `updatePrompt` on the socket) changes a managed session's instructions
+mid-call, and `createSession({..., idempotencyKey})` makes a retried create
+return the first session.
 
 ```js
 const session = await client.createSession({

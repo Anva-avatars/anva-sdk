@@ -62,10 +62,15 @@ export class Anva {
    * @param {{presetId?: string, avatarId?: string, systemPrompt?: string,
    *   voiceId?: string, languageCode?: string, llmMode?: string,
    *   webhookUrl?: string, webhookSecret?: string, maxDurationSeconds?: number,
-   *   metadata?: Record<string, string | number | boolean>, speechInput?: "on" | "off"}} params
+   *   metadata?: Record<string, string | number | boolean>, speechInput?: "on" | "off",
+   *   speechSpeed?: number, wakeUp?: boolean, idempotencyKey?: string}} params
+   *
+   * `idempotencyKey` (16–128 letters, digits, `-` or `_`) makes a retry safe: the
+   * same key and body within 24 hours returns the first session instead of a
+   * second one.
    */
   createSession(params = {}) {
-    const { presetId, avatarId, systemPrompt, voiceId, languageCode, llmMode, serviceMode, performanceOptions, conversationProvider, performanceMode, elevenlabsAgentId, dynamicExpressions, webhookUrl, webhookSecret, maxDurationSeconds, metadata, speechInput } = params;
+    const { presetId, avatarId, systemPrompt, voiceId, languageCode, llmMode, serviceMode, performanceOptions, conversationProvider, performanceMode, elevenlabsAgentId, dynamicExpressions, webhookUrl, webhookSecret, maxDurationSeconds, metadata, speechInput, speechSpeed, wakeUp, idempotencyKey } = params;
     if ((!presetId && !avatarId) || (presetId && avatarId)) {
       throw new Error("createSession requires exactly one of presetId or avatarId");
     }
@@ -87,7 +92,10 @@ export class Anva {
     if (maxDurationSeconds !== undefined) body.max_duration_seconds = maxDurationSeconds;
     if (metadata !== undefined) body.metadata = metadata;
     if (speechInput !== undefined) body.speech_input = speechInput;
-    return this._request("POST", "/api/v2/sessions", body);
+    if (speechSpeed !== undefined) body.speech_speed = speechSpeed;
+    if (wakeUp !== undefined) body.wake_up = wakeUp;
+    return this._request("POST", "/api/v2/sessions", body, undefined,
+      idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined);
   }
 
   getSession(sessionId) {
@@ -98,6 +106,14 @@ export class Anva {
     return this._request("DELETE", `/api/v2/sessions/${enc(sessionId)}`);
   }
 
+  /** Replace a managed session's instructions while it runs; they apply from
+   * the next reply (anva_light, anva_expressive; added as context for
+   * elevenagents_max). On a live socket, `RealtimeSession.updatePrompt` does
+   * the same. */
+  updateSession(sessionId, { systemPrompt }) {
+    return this._request("PATCH", `/api/v2/sessions/${enc(sessionId)}`, { system_prompt: systemPrompt });
+  }
+
   /** Send `text` as a user message; the avatar hears it and replies (it does
    * NOT speak `text` verbatim). For external replies, use serviceMode:"byo_llm" and turnDelta/turnDone on a realtime connection. */
   sendMessage(sessionId, text) {
@@ -106,10 +122,13 @@ export class Anva {
 
   /** Speak `text` verbatim in the session voice (byo_llm), without a
    * turn.request. Resolves with `{status, say_id}`; the line's `turn.complete`
-   * event carries the same `say_id`. Needs the viewer connected. */
-  say(sessionId, text, { sayId } = {}) {
+   * event carries the same `say_id`, and the line ends with one `line.ended`.
+   * `speed` (0.7–1.2) sets this line's speaking rate. Needs the viewer
+   * connected. */
+  say(sessionId, text, { sayId, speed } = {}) {
     const body = { text };
     if (sayId) body.say_id = sayId;
+    if (speed !== undefined) body.speed = speed;
     return this._request("POST", `/api/v2/sessions/${enc(sessionId)}/say`, body);
   }
 
@@ -124,9 +143,9 @@ export class Anva {
 
   /** The session's event-stream WebSocket URL. It carries no credentials:
    * authenticate the handshake with `authHeaders()`. */
-  eventsWsUrl(sessionId) {
+  eventsWsUrl(sessionId, { controls = true } = {}) {
     const ws = this.baseUrl.replace(/^http/, "ws");
-    return `${ws}/api/v2/sessions/${enc(sessionId)}/events`;
+    return `${ws}/api/v2/sessions/${enc(sessionId)}/events${controls ? "" : "?controls=false"}`;
   }
 
   authHeaders() {
@@ -144,13 +163,14 @@ export class Anva {
   }
 
   /** Open a single socket for both events and turn/presentation/speech commands.
+   * `controls: false` leaves out the per-frame face stream.
    * The key travels in the handshake's Authorization header, which Node's
    * WebSocket and the `ws` package accept as `{ headers }`; browsers cannot
    * send it, and the key does not belong in a browser anyway. */
-  async connect(sessionId, { WebSocketImpl } = {}) {
+  async connect(sessionId, { WebSocketImpl, controls = true } = {}) {
     const WS = WebSocketImpl || globalThis.WebSocket;
     if (!WS) throw new Error('No WebSocket implementation; pass { WebSocketImpl }');
-    const stream = new RealtimeSession(new WS(this.eventsWsUrl(sessionId), { headers: this.authHeaders() }));
+    const stream = new RealtimeSession(new WS(this.eventsWsUrl(sessionId, { controls }), { headers: this.authHeaders() }));
     try { await stream.ready; return stream; } catch (error) { stream.close(); throw error; }
   }
   async *events(sessionId, options = {}) {
@@ -229,13 +249,14 @@ export class Anva {
 
   // -- plumbing -------------------------------------------------------------
 
-  async _request(method, path, body, rawType) {
+  async _request(method, path, body, rawType, extraHeaders) {
     const res = await fetch(this.baseUrl + path, {
       method,
       headers: {
         Authorization: `Bearer ${this.apiKey}`,
         "Content-Type": rawType || "application/json",
-        "User-Agent": "anva-js/0.5.0",
+        "User-Agent": "anva-js/0.6.0",
+        ...extraHeaders,
       },
       body: body === undefined ? undefined : rawType ? body : JSON.stringify(body),
     });

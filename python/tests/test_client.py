@@ -32,6 +32,23 @@ class ClientTests(unittest.TestCase):
                 self.assertEqual(result['service_mode'],mode);self.assertIs(self.body()['dynamic_expressions'],False)
             self.client.create_preset('Guide',visual_character_id='old');self.assertEqual(self.body()['avatar_id'],'old')
             with self.assertRaises(ValueError):self.client.create_session('p',avatar_id='a')
+    def test_speaking_rate_and_wake_up(self):
+        with patch('urllib.request.urlopen', self.open):
+            self.client.create_session(avatar_id='a',speech_speed=0.85,wake_up=True)
+            self.assertEqual(self.body()['speech_speed'],0.85);self.assertIs(self.body()['wake_up'],True)
+            self.client.create_session(avatar_id='a');self.assertNotIn('wake_up',self.body())
+    def test_retry_safe_create_line_speed_and_live_instructions(self):
+        with patch('urllib.request.urlopen', self.open):
+            self.client.create_session(avatar_id='a',idempotency_key='portrait-request-0001')
+            self.assertEqual(self.requests[-1].get_header('Idempotency-key'),'portrait-request-0001')
+            self.client.create_session(avatar_id='a');self.assertIsNone(self.requests[-1].get_header('Idempotency-key'))
+            self.client.say('s','Slowly now.',say_id='l1',speed=0.8)
+            self.assertEqual(self.body(),{'text':'Slowly now.','say_id':'l1','speed':0.8})
+            self.client.update_session('s',system_prompt='The learner is a beginner.')
+            self.assertEqual(self.requests[-1].get_method(),'PATCH');self.assertTrue(self.requests[-1].full_url.endswith('/api/v2/sessions/s'))
+            self.assertEqual(self.body(),{'system_prompt':'The learner is a beginner.'})
+        self.assertTrue(self.client.events_ws_url('s',controls=False).endswith('/events?controls=false'))
+        self.assertTrue(self.client.events_ws_url('s').endswith('/events'))
     def test_discovery_and_context(self):
         with patch('urllib.request.urlopen',self.open):
             self.client.capabilities();self.assertTrue(self.requests[-1].full_url.endswith('/capabilities'))
@@ -57,6 +74,13 @@ class ClientTests(unittest.TestCase):
             self.assertEqual(next(iter(stream))['payload']['code'],'stale_turn')
         self.assertTrue(socket.closed)
         self.assertEqual([e['type'] for e in socket.sent],['turn.delta','turn.done','context.update','presentation.start','interrupt','speech.append'])
+    def test_socket_line_speed_and_live_prompt(self):
+        socket=Socket()
+        with RealtimeSession(socket) as stream:
+            stream.say('Slowly.','a',speed=0.8);stream.say_delta('b','Try ',speed=0.9);stream.update_prompt('Speak slowly.')
+        self.assertEqual(socket.sent,[{'type':'say','payload':{'text':'Slowly.','say_id':'a','speed':0.8}},
+                                      {'type':'say.delta','payload':{'say_id':'b','text':'Try ','speed':0.9}},
+                                      {'type':'session.update','payload':{'system_prompt':'Speak slowly.'}}])
     def test_session_duration_limit(self):
         with patch('urllib.request.urlopen',self.open):
             self.client.create_session('p');self.assertNotIn('max_duration_seconds',self.body())

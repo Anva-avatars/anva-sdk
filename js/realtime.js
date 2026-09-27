@@ -57,8 +57,20 @@ export class RealtimeSession {
   turnDone(turnId) { return this.send('turn.done', { turn_id: turnId }); }
   turnCancel(turnId, reason = '') { return this.send('turn.cancel', { turn_id: turnId, reason }); }
   /** Speak a host line in the session voice (byo_llm). */
-  say(text, sayId) { return this.send('say', sayId ? { text, say_id: sayId } : { text }); }
-  sayDelta(sayId, text) { return this.send('say.delta', { say_id: sayId, text }); }
+  /** Speak `text` verbatim; `speed` (0.7–1.2) sets this line's rate. */
+  say(text, sayId, { speed } = {}) {
+    const payload = sayId ? { text, say_id: sayId } : { text };
+    if (speed !== undefined) payload.speed = speed;
+    return this.send('say', payload);
+  }
+  /** Stream a line; put `speed` on its first delta. */
+  sayDelta(sayId, text, { speed } = {}) {
+    const payload = { say_id: sayId, text };
+    if (speed !== undefined) payload.speed = speed;
+    return this.send('say.delta', payload);
+  }
+  /** Replace a managed session's instructions mid-call (session.update). */
+  updatePrompt(systemPrompt) { return this.send('session.update', { system_prompt: systemPrompt }); }
   sayDone(sayId) { return this.send('say.done', { say_id: sayId }); }
   startSpeech(turnId, { text } = {}) { return this.send('speech.start', speechStart(turnId, text)); }
   appendSpeech(turnId, seq, startSample, pcm) { return this.send('speech.append', speechAppend(turnId, seq, startSample, pcm)); }

@@ -89,15 +89,26 @@ class RealtimeSession:
     def turn_cancel(self, turn_id: str, reason: str = "") -> None:
         self.send("turn.cancel", {"turn_id": turn_id, "reason": reason})
 
-    def say(self, text: str, say_id: Optional[str] = None) -> None:
-        """Speak a host line in the session voice (byo_llm)."""
+    def say(self, text: str, say_id: Optional[str] = None, *, speed: Optional[float] = None) -> None:
+        """Speak a host line in the session voice (byo_llm); ``speed``
+        (0.7–1.2) sets this line's rate."""
         payload: Dict[str, Any] = {"text": text}
         if say_id:
             payload["say_id"] = say_id
+        if speed is not None:
+            payload["speed"] = speed
         self.send("say", payload)
 
-    def say_delta(self, say_id: str, text: str) -> None:
-        self.send("say.delta", {"say_id": say_id, "text": text})
+    def say_delta(self, say_id: str, text: str, *, speed: Optional[float] = None) -> None:
+        """Stream a host line; put ``speed`` on its first delta."""
+        payload: Dict[str, Any] = {"say_id": say_id, "text": text}
+        if speed is not None:
+            payload["speed"] = speed
+        self.send("say.delta", payload)
+
+    def update_prompt(self, system_prompt: str) -> None:
+        """Replace a managed session's instructions mid-call (session.update)."""
+        self.send("session.update", {"system_prompt": system_prompt})
 
     def say_done(self, say_id: str) -> None:
         self.send("say.done", {"say_id": say_id})

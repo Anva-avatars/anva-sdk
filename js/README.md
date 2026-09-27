@@ -1,6 +1,6 @@
 # anva-sdk — JavaScript / TypeScript
 
-Install with `npm install anva-sdk@0.5.0`. REST uses Node 18+'s fetch. Realtime needs
+Install with `npm install anva-sdk@0.6.0`. REST uses Node 18+'s fetch. Realtime needs
 Node 22+'s WebSocket or an injected compatible constructor.
 
 ```js

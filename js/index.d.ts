@@ -8,6 +8,8 @@ export interface PerformanceOptions {
   performance_mode?: string;
   elevenlabs_agent_id?: string;
   dynamic_expressions?: boolean;
+  speech_speed?: number;
+  wake_up?: boolean;
   [key: string]: unknown;
 }
 export interface CreateSessionParams {
@@ -32,6 +34,12 @@ export interface CreateSessionParams {
   metadata?: Record<string, string | number | boolean>;
   /** "off" for byo_llm, anva_light or anva_expressive hosts that transcribe the user themselves. */
   speechInput?: SpeechInput;
+  /** Speaking rate, 0.7–1.2 (1 is the voice's natural pace). anva_light and byo_llm voices. */
+  speechSpeed?: number;
+  /** Start with the avatar's eyes closed; they open once the viewer's video is showing. session.info reports wake_up false for avatars that cannot close their eyes convincingly. */
+  wakeUp?: boolean;
+  /** Sent as the Idempotency-Key header (16–128 letters, digits, - or _): a retry with the same key and body within 24 hours returns the first session. */
+  idempotencyKey?: string;
 }
 export interface ModeCapability { id: ServiceMode; name: string; available: boolean; reason?: string; input?: string[]; [key: string]: unknown; }
 export interface Capabilities { api_version: string; modes: ModeCapability[]; audio_input?: Record<string, unknown>; [key: string]: unknown; }
@@ -53,6 +61,10 @@ export interface Session {
   events_ws_url: string;
   [key: string]: unknown;
 }
+/** Metered connected time, from GET /sessions/{id}: running while active, final once ended. */
+export interface SessionUsage { seconds: number; tokens: number; unit: string; }
+/** How much of a host line the viewer heard; exactly one per `say` line. */
+export interface LineEnded { say_id: string; status: 'completed' | 'interrupted'; spoken_text: string; spoken_until_ms: number; }
 export interface Preset {
   id: string; name: string; avatar_id: string;
   /** Deprecated alias. */ visual_character_id?: string;
@@ -68,7 +80,12 @@ export interface PresentationContext {
   pages: Array<{ id: string; title: string; items: Array<{id: string; text: string}> }>;
 }
 export interface PresentationStart { version: 1; demo: string; revision: number; }
-export interface EventsOptions { WebSocketImpl?: new (url: string, options: { headers: Record<string, string> }) => WebSocket; }
+export interface EventsOptions {
+  WebSocketImpl?: new (url: string, options: { headers: Record<string, string> }) => WebSocket;
+  /** false leaves the per-frame face stream (`controls`) out of the events. */
+  controls?: boolean;
+}
+export interface SayOptions { sayId?: string; /** This line's speaking rate, 0.7–1.2. */ speed?: number; }
 export type PCMBytes = Uint8Array | ArrayBuffer;
 export declare class AnvaError extends Error {
   constructor(status: number, code: string, message: string, details?: Record<string, unknown>);
@@ -89,8 +106,11 @@ export declare class RealtimeSession implements AsyncIterable<SessionEvent> {
   turnDelta(turnId: string, text: string): Promise<void>;
   turnDone(turnId: string): Promise<void>;
   turnCancel(turnId: string, reason?: string): Promise<void>;
-  say(text: string, sayId?: string): Promise<void>;
-  sayDelta(sayId: string, text: string): Promise<void>;
+  say(text: string, sayId?: string, options?: { speed?: number }): Promise<void>;
+  /** Put `speed` on a streamed line's first delta. */
+  sayDelta(sayId: string, text: string, options?: { speed?: number }): Promise<void>;
+  /** Replace a managed session's instructions mid-call (session.update). */
+  updatePrompt(systemPrompt: string): Promise<void>;
   sayDone(sayId: string): Promise<void>;
   startSpeech(turnId: string, options?: {text?: string}): Promise<void>;
   appendSpeech(turnId: string, seq: number, startSample: number, pcm: PCMBytes): Promise<void>;
@@ -136,14 +156,16 @@ export declare class Anva {
   constructor(apiKey: string, opts?: AnvaOptions);
   apiKey: string; baseUrl: string;
   createSession(params: CreateSessionParams): Promise<Session>;
-  getSession(sessionId: string): Promise<Record<string, unknown>>;
+  getSession(sessionId: string): Promise<Record<string, unknown> & { usage?: SessionUsage }>;
   endSession(sessionId: string): Promise<Record<string, unknown>>;
+  /** Replace a managed session's instructions while it runs (PATCH /sessions/{id}). */
+  updateSession(sessionId: string, params: { systemPrompt: string }): Promise<Record<string, unknown>>;
   sendMessage(sessionId: string, text: string): Promise<{status: string}>;
-  say(sessionId: string, text: string, options?: {sayId?: string}): Promise<{status: string; say_id: string}>;
+  say(sessionId: string, text: string, options?: SayOptions): Promise<{status: string; say_id: string}>;
   interrupt(sessionId: string): Promise<{status: string}>;
   triggerAction(sessionId: string, name: string): Promise<{status: string}>;
   /** Credential-free events URL; authenticate with authHeaders(). */
-  eventsWsUrl(sessionId: string): string;
+  eventsWsUrl(sessionId: string, options?: { controls?: boolean }): string;
   authHeaders(): { Authorization: string };
   /** @deprecated Puts the API key in the URL. Use connect(), or eventsWsUrl() with authHeaders(). */
   eventsUrl(sessionId: string): string;

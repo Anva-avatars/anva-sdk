@@ -2,7 +2,7 @@
 
 Standard-library REST client and a bidirectional wrapper for your chosen
 WebSocket library. Install with
-`go get github.com/Anva-avatars/anva-sdk/go@v0.5.0`.
+`go get github.com/Anva-avatars/anva-sdk/go@v0.6.0`.
 
 ```go
 import (
@@ -42,7 +42,12 @@ control socket does not end a session; call `EndSession` when finished.
 The events socket never starts a session; call `stream.WaitLive()` before
 sending commands. `CreateSessionParams.SpeechInput = "off"` suits hosts that
 transcribe the user themselves (push-to-talk). `Client.Say` and
-`Realtime.Say` / `SayDelta` / `SayDone` speak lines of your own (BYOLLM).
+`Realtime.Say` / `SayDelta` / `SayDone` speak lines of your own (BYOLLM);
+`SayAtSpeed` / `SayDeltaAtSpeed` set a line's rate. `Client.UpdateSession` and
+`Realtime.UpdatePrompt` change a managed session's instructions mid-call,
+`CreateSessionParams.IdempotencyKey` makes a retried create return the first
+session, and `EventsWSURL(id, anva.WithoutControls())` leaves out the face
+stream.
 `Client.Lipsync` returns a clip's mouth curves; stream with
 `NewLipsyncStream(socket)` dialled at `client.LipsyncStreamURL(16000, "")` with
 `client.AuthHeader()` (Enterprise).

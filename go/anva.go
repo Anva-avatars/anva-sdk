@@ -81,9 +81,20 @@ type CreateSessionParams struct {
 	// SpeechInput "off" (BYOLLM, AnvaLight, AnvaExpressive) is for hosts that
 	// transcribe the user themselves, such as push-to-talk: the embed opens no
 	// microphone and each user turn arrives through SendMessage.
-	SpeechInput   string `json:"speech_input,omitempty"`
-	WebhookURL    string `json:"webhook_url,omitempty"`
-	WebhookSecret string `json:"webhook_secret,omitempty"`
+	SpeechInput string `json:"speech_input,omitempty"`
+	// SpeechSpeed is the speaking rate, 0.7–1.2 (1 is the voice's natural
+	// pace), for anva_light and byo_llm voices; nil keeps the default.
+	SpeechSpeed *float64 `json:"speech_speed,omitempty"`
+	// WakeUp starts the call with the avatar's eyes closed; they open once
+	// the viewer's video is showing. session.info reports wake_up false for
+	// avatars that cannot close their eyes convincingly.
+	WakeUp *bool `json:"wake_up,omitempty"`
+	// IdempotencyKey (16–128 letters, digits, - or _) is sent as the
+	// Idempotency-Key header: a retry with the same key and body within 24
+	// hours returns the first session instead of a second one.
+	IdempotencyKey string `json:"-"`
+	WebhookURL     string `json:"webhook_url,omitempty"`
+	WebhookSecret  string `json:"webhook_secret,omitempty"`
 	// MaxDurationSeconds (60–7200) ends the session that long after it goes
 	// live; 0 applies the server's 2-hour ceiling.
 	MaxDurationSeconds int `json:"max_duration_seconds,omitempty"`
@@ -147,7 +158,11 @@ func (c *Client) CreateSession(ctx context.Context, p CreateSessionParams) (*Ses
 		return nil, fmt.Errorf("provide exactly one of PresetID or AvatarID")
 	}
 	var out Session
-	err := c.do(ctx, http.MethodPost, "/api/v2/sessions", p, &out)
+	var header http.Header
+	if p.IdempotencyKey != "" {
+		header = http.Header{"Idempotency-Key": []string{p.IdempotencyKey}}
+	}
+	err := c.do(ctx, http.MethodPost, "/api/v2/sessions", p, &out, header)
 	return &out, err
 }
 
@@ -159,6 +174,14 @@ func (c *Client) GetSession(ctx context.Context, sessionID string) (map[string]a
 
 func (c *Client) EndSession(ctx context.Context, sessionID string) error {
 	return c.do(ctx, http.MethodDelete, "/api/v2/sessions/"+esc(sessionID), nil, nil)
+}
+
+// UpdateSession replaces a managed session's instructions while it runs; they
+// apply from the next reply (AnvaLight, AnvaExpressive; added as context for
+// ElevenAgentsMax). On a live connection, Realtime.UpdatePrompt does the same.
+func (c *Client) UpdateSession(ctx context.Context, sessionID, systemPrompt string) error {
+	body := map[string]string{"system_prompt": systemPrompt}
+	return c.do(ctx, http.MethodPatch, "/api/v2/sessions/"+esc(sessionID), body, nil)
 }
 
 // SendMessage sends text as a user message; the avatar hears it and replies
@@ -184,9 +207,22 @@ func (c *Client) TriggerAction(ctx context.Context, sessionID, name string) erro
 // The line's turn.complete event carries the same say_id. The viewer's embed
 // must be connected.
 func (c *Client) Say(ctx context.Context, sessionID, text, sayID string) (string, error) {
-	body := map[string]string{"text": text}
+	return c.say(ctx, sessionID, text, sayID, nil)
+}
+
+// SayAtSpeed is Say with this line's speaking rate (0.7–1.2). Every line ends
+// with one line.ended event saying how much of it the viewer heard.
+func (c *Client) SayAtSpeed(ctx context.Context, sessionID, text, sayID string, speed float64) (string, error) {
+	return c.say(ctx, sessionID, text, sayID, &speed)
+}
+
+func (c *Client) say(ctx context.Context, sessionID, text, sayID string, speed *float64) (string, error) {
+	body := map[string]any{"text": text}
 	if sayID != "" {
 		body["say_id"] = sayID
+	}
+	if speed != nil {
+		body["speed"] = *speed
 	}
 	var out struct {
 		SayID string `json:"say_id"`
@@ -199,9 +235,25 @@ func (c *Client) Say(ctx context.Context, sessionID, text, sayID string) (string
 // (transcripts, state changes). It carries no credentials; send AuthHeader
 // with the handshake, e.g.
 // websocket.DefaultDialer.Dial(c.EventsWSURL(id), c.AuthHeader()).
-func (c *Client) EventsWSURL(sessionID string) string {
+func (c *Client) EventsWSURL(sessionID string, opts ...EventsOption) string {
 	base := strings.Replace(c.BaseURL, "http", "ws", 1)
-	return base + "/api/v2/sessions/" + esc(sessionID) + "/events"
+	u := base + "/api/v2/sessions/" + esc(sessionID) + "/events"
+	q := url.Values{}
+	for _, opt := range opts {
+		opt(q)
+	}
+	if len(q) > 0 {
+		u += "?" + q.Encode()
+	}
+	return u
+}
+
+// EventsOption adjusts what the events socket carries.
+type EventsOption func(url.Values)
+
+// WithoutControls leaves the per-frame face stream (controls) out of the events.
+func WithoutControls() EventsOption {
+	return func(q url.Values) { q.Set("controls", "false") }
 }
 
 // AuthHeader authenticates a WebSocket handshake to EventsWSURL.
@@ -249,7 +301,7 @@ func (c *Client) DeletePreset(ctx context.Context, presetID string) error {
 
 // -- plumbing ---------------------------------------------------------------
 
-func (c *Client) do(ctx context.Context, method, path string, body, out any) error {
+func (c *Client) do(ctx context.Context, method, path string, body, out any, headers ...http.Header) error {
 	var reader io.Reader
 	if body != nil {
 		raw, err := json.Marshal(body)
@@ -258,19 +310,26 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 		}
 		reader = bytes.NewReader(raw)
 	}
-	return c.send(ctx, method, path, "application/json", reader, out)
+	return c.send(ctx, method, path, "application/json", reader, out, headers...)
 }
 
 // send performs one request with a body of the given content type and decodes
 // a JSON reply into out.
-func (c *Client) send(ctx context.Context, method, path, contentType string, body io.Reader, out any) error {
+func (c *Client) send(ctx context.Context, method, path, contentType string, body io.Reader, out any, headers ...http.Header) error {
 	req, err := http.NewRequestWithContext(ctx, method, c.BaseURL+path, body)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.APIKey)
 	req.Header.Set("Content-Type", contentType)
-	req.Header.Set("User-Agent", "anva-go/0.5.0")
+	req.Header.Set("User-Agent", "anva-go/0.6.0")
+	for _, h := range headers {
+		for k, vs := range h {
+			for _, v := range vs {
+				req.Header.Add(k, v)
+			}
+		}
+	}
 	httpc := c.HTTPClient
 	if httpc == nil {
 		httpc = http.DefaultClient

@@ -216,13 +216,48 @@ func (c *Client) SayAtSpeed(ctx context.Context, sessionID, text, sayID string, 
 	return c.say(ctx, sessionID, text, sayID, &speed)
 }
 
+// LineOptions shape one host line. Speed (0.7–1.2) sets its speaking rate; 0
+// keeps the session's. Queue waits behind the line being spoken instead of
+// interrupting it (at most 8 wait; one more is refused with an error event
+// say_queue_full). On a streamed line, both are read from its first delta.
+type LineOptions struct {
+	Speed float64
+	Queue bool
+}
+
+func (o LineOptions) apply(p map[string]any) {
+	if o.Speed != 0 {
+		p["speed"] = o.Speed
+	}
+	if o.Queue {
+		p["queue"] = true
+	}
+}
+
+// SayWith is Say with LineOptions, e.g. LineOptions{Queue: true} to queue
+// the line behind the one being spoken.
+func (c *Client) SayWith(ctx context.Context, sessionID, text, sayID string, opts LineOptions) (string, error) {
+	var speed *float64
+	if opts.Speed != 0 {
+		speed = &opts.Speed
+	}
+	return c.sayLine(ctx, sessionID, text, sayID, speed, opts.Queue)
+}
+
 func (c *Client) say(ctx context.Context, sessionID, text, sayID string, speed *float64) (string, error) {
+	return c.sayLine(ctx, sessionID, text, sayID, speed, false)
+}
+
+func (c *Client) sayLine(ctx context.Context, sessionID, text, sayID string, speed *float64, queue bool) (string, error) {
 	body := map[string]any{"text": text}
 	if sayID != "" {
 		body["say_id"] = sayID
 	}
 	if speed != nil {
 		body["speed"] = *speed
+	}
+	if queue {
+		body["queue"] = true
 	}
 	var out struct {
 		SayID string `json:"say_id"`

@@ -82,6 +82,25 @@ func (r *Realtime) SayDeltaAtSpeed(sayID, text string, speed float64) error {
 	return r.Send("say.delta", map[string]any{"say_id": sayID, "text": text, "speed": speed})
 }
 
+// SayWith speaks one host line with LineOptions; LineOptions{Queue: true}
+// waits behind the line being spoken instead of interrupting it.
+func (r *Realtime) SayWith(text, sayID string, opts LineOptions) error {
+	p := map[string]any{"text": text}
+	if sayID != "" {
+		p["say_id"] = sayID
+	}
+	opts.apply(p)
+	return r.Send("say", p)
+}
+
+// SayDeltaWith starts a streamed line with LineOptions; send it as the line's
+// first delta.
+func (r *Realtime) SayDeltaWith(sayID, text string, opts LineOptions) error {
+	p := map[string]any{"say_id": sayID, "text": text}
+	opts.apply(p)
+	return r.Send("say.delta", p)
+}
+
 // UpdatePrompt replaces a managed session's instructions mid-call
 // (session.update).
 func (r *Realtime) UpdatePrompt(systemPrompt string) error {

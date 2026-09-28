@@ -6,16 +6,62 @@ The events stream (WebSocket) needs the optional extra: pip install anva[ws].
 """
 from __future__ import annotations
 
+import base64
 import json
+import sys
 import urllib.error
 import urllib.parse
 import urllib.request
 import warnings
-from typing import Any, Dict, Iterator, Optional
+from typing import Any, Dict, Iterator, List, Optional
 
-from .realtime import LipsyncStream, RealtimeSession, speech_start, speech_append
+from .realtime import LipsyncStream, RealtimeSession, SpeechStream, speech_start, speech_append
+
+if sys.version_info >= (3, 11):
+    from typing import NotRequired, TypedDict
+else:  # before 3.11, alignment is typed as Optional rather than NotRequired
+    from typing import TypedDict
+    NotRequired = Optional
 
 DEFAULT_BASE_URL = "https://anva.ai"
+
+
+class SpeechAudio(TypedDict):
+    """``format`` is ``"wav"`` (a complete WAV file) or ``"pcm"`` (16-bit
+    little-endian mono); ``data`` is decoded from the API's base64."""
+    format: str
+    data: bytes
+
+
+class SpeechCurves(TypedDict):
+    """``frames[n][i]`` is ``channels[i]`` at ``n / fps`` seconds;
+    ``frame_count = ceil(samples / 800)``."""
+    fps: int
+    channels: List[str]
+    frame_count: int
+    preset: str
+    model: str
+    release: str
+    frames: List[List[float]]
+
+
+class SpeechAlignment(TypedDict):
+    """Character timing in seconds on the audio clock."""
+    characters: List[str]
+    starts: List[float]
+    ends: List[float]
+
+
+class SpeechResult(TypedDict):
+    """What ``Anva.synthesize`` returns (a plain dict at runtime)."""
+    id: str
+    voice_id: str
+    sample_rate: int
+    duration_s: float
+    audio: SpeechAudio
+    curves: SpeechCurves
+    alignment: NotRequired[SpeechAlignment]
+    billing: Dict[str, Any]
 
 
 class AnvaError(Exception):
@@ -153,17 +199,20 @@ class Anva:
             {"text": text})
 
     def say(self, session_id: str, text: str, *, say_id: Optional[str] = None,
-            speed: Optional[float] = None) -> Dict[str, Any]:
+            speed: Optional[float] = None, queue: Optional[bool] = None) -> Dict[str, Any]:
         """Speak ``text`` verbatim in the session voice (byo_llm), without a
         turn.request. Returns ``{"status", "say_id"}``; the line's
         ``turn.complete`` event carries the same ``say_id`` and it ends with
         one ``line.ended``. ``speed`` (0.7–1.2) sets this line's speaking
-        rate. Needs the viewer connected."""
+        rate. ``queue=True`` waits behind the line being spoken instead of
+        interrupting it. Needs the viewer connected."""
         body: Dict[str, Any] = {"text": text}
         if say_id:
             body["say_id"] = say_id
         if speed is not None:
             body["speed"] = speed
+        if queue is not None:
+            body["queue"] = queue
         return self._request("POST", f"/api/v2/sessions/{_esc(session_id)}/say", body)
 
     def interrupt(self, session_id: str) -> Dict[str, Any]:
@@ -241,6 +290,48 @@ class Anva:
             raise RuntimeError("realtime requires pip install anva[ws]") from e
         return LipsyncStream(connect(self.lipsync_stream_url(sample_rate=sample_rate, preset=preset),
                                      additional_headers=self.auth_headers()))
+
+    def synthesize(self, text: str, *, voice_id: str, speed: Optional[float] = None,
+                   preset: Optional[str] = None, format: Optional[str] = None) -> SpeechResult:
+        """Text to speech plus mouth curves (Speech API, Enterprise): Anva TTS
+        audio at 24 kHz and the 24 ARKit mouth channels at 30 fps measured on
+        it. ``voice_id`` is a voice from ``list_voices()``; ``speed`` is
+        0.7–1.2; ``preset`` is ``hybrid`` or ``lowlat``; ``format`` is ``wav``
+        (default) or ``pcm``. ``result["audio"]["data"]`` is decoded bytes."""
+        body: Dict[str, Any] = {"text": text, "voice_id": voice_id}
+        for key, value in {"speed": speed, "preset": preset, "format": format}.items():
+            if value is not None:
+                body[key] = value
+        result = self._request("POST", "/api/v2/speech", body)
+        audio = result.get("audio")
+        if isinstance(audio, dict) and isinstance(audio.get("data"), str):
+            audio["data"] = base64.b64decode(audio["data"])
+        return result  # type: ignore[return-value]
+
+    def speech_stream_url(self, *, voice_id: Optional[str] = None, speed: Optional[float] = None,
+                          preset: Optional[str] = None) -> str:
+        """The Speech stream's WebSocket URL; authenticate with
+        ``auth_headers()``. The arguments are defaults for the lines on it."""
+        query: Dict[str, str] = {}
+        if voice_id:
+            query["voice_id"] = voice_id
+        if speed is not None:
+            query["speed"] = str(speed)
+        if preset:
+            query["preset"] = preset
+        ws_base = self.base_url.replace("http", "ws", 1)
+        return f"{ws_base}/api/v2/speech/stream" + ("?" + urllib.parse.urlencode(query) if query else "")
+
+    def connect_speech(self, *, voice_id: Optional[str] = None, speed: Optional[float] = None,
+                       preset: Optional[str] = None) -> SpeechStream:
+        """Speak lines over one socket (Enterprise): ``speak``, ``cancel`` and
+        ``close``. Requires ``pip install anva[ws]``."""
+        try:
+            from websockets.sync.client import connect
+        except ImportError as e:
+            raise RuntimeError("realtime requires pip install anva[ws]") from e
+        return SpeechStream(connect(self.speech_stream_url(voice_id=voice_id, speed=speed, preset=preset),
+                                    additional_headers=self.auth_headers()))
 
     def capabilities(self) -> Dict[str, Any]:
         return self._request("GET", "/api/v2/capabilities")

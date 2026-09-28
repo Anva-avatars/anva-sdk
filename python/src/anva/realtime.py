@@ -89,21 +89,29 @@ class RealtimeSession:
     def turn_cancel(self, turn_id: str, reason: str = "") -> None:
         self.send("turn.cancel", {"turn_id": turn_id, "reason": reason})
 
-    def say(self, text: str, say_id: Optional[str] = None, *, speed: Optional[float] = None) -> None:
+    def say(self, text: str, say_id: Optional[str] = None, *, speed: Optional[float] = None,
+            queue: Optional[bool] = None) -> None:
         """Speak a host line in the session voice (byo_llm); ``speed``
-        (0.7–1.2) sets this line's rate."""
+        (0.7–1.2) sets this line's rate. ``queue=True`` waits behind the line
+        being spoken instead of interrupting it (at most 8 wait; one more is
+        refused with an ``error`` event ``say_queue_full``)."""
         payload: Dict[str, Any] = {"text": text}
         if say_id:
             payload["say_id"] = say_id
         if speed is not None:
             payload["speed"] = speed
+        if queue is not None:
+            payload["queue"] = queue
         self.send("say", payload)
 
-    def say_delta(self, say_id: str, text: str, *, speed: Optional[float] = None) -> None:
-        """Stream a host line; put ``speed`` on its first delta."""
+    def say_delta(self, say_id: str, text: str, *, speed: Optional[float] = None,
+                  queue: Optional[bool] = None) -> None:
+        """Stream a host line; put ``speed`` and ``queue`` on its first delta."""
         payload: Dict[str, Any] = {"say_id": say_id, "text": text}
         if speed is not None:
             payload["speed"] = speed
+        if queue is not None:
+            payload["queue"] = queue
         self.send("say.delta", payload)
 
     def update_prompt(self, system_prompt: str) -> None:
@@ -160,3 +168,64 @@ class LipsyncStream:
     def flush(self) -> None:
         """End an utterance: the remaining frames arrive, then ``flushed``."""
         self.socket.send(json.dumps({"type": "flush"}))
+
+
+class SpeechStream:
+    """Speech API stream (Enterprise): text in, mouth curves and 24 kHz PCM out.
+
+    Iterate for ``ready``, ``curves``, ``audio``, ``alignment``, ``done``,
+    ``cancelled`` and ``error`` messages. An ``audio`` message's ``data`` is
+    decoded to ``bytes`` of 16-bit little-endian mono PCM. A line's curves
+    always arrive before the audio they describe. One line is spoken at a
+    time: a ``speak`` while a line runs is refused with ``busy_line``, so wait
+    for its ``done`` or ``cancel`` it. The server closes a stream that gets no
+    command for 60 seconds while nothing is spoken (``idle_timeout``).
+    """
+    def __init__(self, socket: Any):
+        self.socket = socket
+        self._closed = False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        self.close()
+
+    def close(self) -> None:
+        """Send ``{"type": "close"}`` and close the socket."""
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            self.socket.send(json.dumps({"type": "close"}))
+        except Exception:  # the socket may already be gone; close it anyway
+            pass
+        self.socket.close()
+
+    def __iter__(self) -> Iterator[Dict[str, Any]]:
+        for raw in self.socket:
+            try:
+                message = json.loads(raw)
+            except (TypeError, ValueError):
+                continue
+            if isinstance(message, dict) and message.get("type") == "audio" and isinstance(message.get("data"), str):
+                message["data"] = base64.b64decode(message["data"])
+            yield message
+
+    def speak(self, id: str, text: str, *, voice_id: Optional[str] = None,
+              speed: Optional[float] = None, preset: Optional[str] = None) -> None:
+        """Speak one line. ``id`` (1–128 characters) is yours and is echoed on
+        every event for the line; ``voice_id``, ``speed`` and ``preset``
+        override the stream's defaults."""
+        message: Dict[str, Any] = {"type": "speak", "id": id, "text": text}
+        if voice_id is not None:
+            message["voice_id"] = voice_id
+        if speed is not None:
+            message["speed"] = speed
+        if preset is not None:
+            message["preset"] = preset
+        self.socket.send(json.dumps(message))
+
+    def cancel(self, id: str) -> None:
+        """Stop a line; it ends with ``cancelled``."""
+        self.socket.send(json.dumps({"type": "cancel", "id": id}))

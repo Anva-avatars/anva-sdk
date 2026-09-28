@@ -5,7 +5,7 @@ import types
 import unittest
 import urllib.error
 from unittest.mock import patch
-from anva import Anva, AnvaError, LipsyncStream, RealtimeSession
+from anva import Anva, AnvaError, LipsyncStream, RealtimeSession, SpeechStream
 
 class Response:
     def __init__(self, body): self.body = body
@@ -137,4 +137,52 @@ class ClientTests(unittest.TestCase):
         with patch.dict(sys.modules,modules):self.client.connect_lipsync(sample_rate=16000)
         self.assertEqual(calls[0][0],'wss://fixture.invalid/api/v2/lipsync/stream?sample_rate=16000')
         self.assertEqual(calls[0][1]['additional_headers'],{'Authorization':'Bearer fixture-key'})
+    def test_synthesize_decodes_audio(self):
+        reply={'id':'speech_1','voice_id':'elevenlabs:v','sample_rate':24000,'duration_s':0.1,'audio':{'format':'pcm','data':'AID/fw=='},
+               'curves':{'fps':30,'channels':['jawOpen'],'frame_count':1,'preset':'hybrid','model':'m','release':'r','frames':[[0.5]]},
+               'billing':{'unit':'tokens','basis':'audio_time','seconds':0.1,'tokens_per_minute':120}}
+        def open_(req,timeout):self.requests.append(req);return Response(reply)
+        with patch('urllib.request.urlopen',open_):
+            result=self.client.synthesize('Hi.',voice_id='elevenlabs:v',speed=0.9,preset='lowlat',format='pcm')
+            self.assertEqual(self.requests[-1].full_url,'https://fixture.invalid/api/v2/speech');self.assertEqual(self.requests[-1].get_method(),'POST')
+            self.assertEqual(self.body(),{'text':'Hi.','voice_id':'elevenlabs:v','speed':0.9,'preset':'lowlat','format':'pcm'})
+            self.assertEqual(result['audio']['data'],b'\x00\x80\xff\x7f');self.assertEqual(result['curves']['frames'][0][0],0.5)
+            reply['audio']['data']='AID/fw=='
+            self.client.synthesize('Hi.',voice_id='elevenlabs:v');self.assertEqual(self.body(),{'text':'Hi.','voice_id':'elevenlabs:v'})
+    def test_speech_stream(self):
+        class SpeechSocket:
+            def __init__(self): self.sent=[]; self.closed=False
+            def send(self, data): self.sent.append(json.loads(data))
+            def close(self): self.closed=True
+            def __iter__(self): return iter([json.dumps(m) for m in [
+                {"type":"ready","sample_rate":24000,"fps":30,"channels":["jawOpen"],"preset":"hybrid","max_text_chars":2000,"release":"r"},
+                {"type":"curves","id":"l1","start":0,"values":[[0.5]]},
+                {"type":"audio","id":"l1","start_sample":0,"samples":2,"sample_rate":24000,"data":"AID/fw=="},
+                {"type":"done","id":"l1","total_samples":2,"frame_count":1,"duration_s":0.0001}]])
+        socket=SpeechSocket()
+        with SpeechStream(socket) as stream:
+            stream.speak('l1','Hello.');stream.speak('l2','Hi.',voice_id='elevenlabs:w',speed=1.1,preset='lowlat');stream.cancel('l2')
+            messages=list(stream)
+        self.assertEqual([m['type'] for m in messages],['ready','curves','audio','done'])
+        self.assertEqual(messages[2]['data'],b'\x00\x80\xff\x7f')
+        self.assertEqual(socket.sent,[{'type':'speak','id':'l1','text':'Hello.'},
+                                      {'type':'speak','id':'l2','text':'Hi.','voice_id':'elevenlabs:w','speed':1.1,'preset':'lowlat'},
+                                      {'type':'cancel','id':'l2'},{'type':'close'}])
+        self.assertTrue(socket.closed)
+        self.assertEqual(self.client.speech_stream_url(),'wss://fixture.invalid/api/v2/speech/stream')
+        calls=[];client_mod=types.ModuleType('websockets.sync.client')
+        client_mod.connect=lambda uri,**kw:calls.append((uri,kw)) or SpeechSocket()
+        modules={'websockets':types.ModuleType('websockets'),'websockets.sync':types.ModuleType('websockets.sync'),'websockets.sync.client':client_mod}
+        with patch.dict(sys.modules,modules):self.assertIsInstance(self.client.connect_speech(voice_id='elevenlabs:v',speed=0.9,preset='lowlat'),SpeechStream)
+        self.assertEqual(calls[0][0],'wss://fixture.invalid/api/v2/speech/stream?voice_id=elevenlabs%3Av&speed=0.9&preset=lowlat')
+        self.assertEqual(calls[0][1]['additional_headers'],{'Authorization':'Bearer fixture-key'})
+    def test_say_queue(self):
+        with patch('urllib.request.urlopen',self.open):
+            self.client.say('s','Next.',say_id='l2',queue=True);self.assertEqual(self.body(),{'text':'Next.','say_id':'l2','queue':True})
+        socket=Socket()
+        with RealtimeSession(socket) as stream:
+            stream.say('After.','a',queue=True);stream.say_delta('b','Then ',speed=0.9,queue=True);stream.say('Now.','c')
+        self.assertEqual(socket.sent,[{'type':'say','payload':{'text':'After.','say_id':'a','queue':True}},
+                                      {'type':'say.delta','payload':{'say_id':'b','text':'Then ','speed':0.9,'queue':True}},
+                                      {'type':'say','payload':{'text':'Now.','say_id':'c'}}])
 if __name__=='__main__': unittest.main()

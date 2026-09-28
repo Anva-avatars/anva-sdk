@@ -4,13 +4,13 @@ Clients for Anva's session, billing, capability and realtime-control APIs.
 API keys and authenticated sockets belong on your backend; give browsers only
 the returned `embed_url` for WebRTC audio/video.
 
-Install SDK **0.6.0**:
+Install SDK **0.7.0**:
 
 | Language | Install | Import |
 |---|---|---|
-| Python | `pip install "anva[ws]==0.6.0"` | `from anva import Anva` |
-| JavaScript / TypeScript | `npm install anva-sdk@0.6.0` | `import { Anva } from "anva-sdk"` |
-| Go | `go get github.com/Anva-avatars/anva-sdk/go@v0.6.0` | `import anva "github.com/Anva-avatars/anva-sdk/go"` |
+| Python | `pip install "anva[ws]==0.7.0"` | `from anva import Anva` |
+| JavaScript / TypeScript | `npm install anva-sdk@0.7.0` | `import { Anva } from "anva-sdk"` |
+| Go | `go get github.com/Anva-avatars/anva-sdk/go@v0.7.0` | `import anva "github.com/Anva-avatars/anva-sdk/go"` |
 
 The production base defaults to `https://anva.ai`. Set `base_url`, `baseUrl`, or
 `Client.BaseURL` to your updated deployment for local integration.
@@ -141,8 +141,19 @@ while the avatar speaks takes the floor.
 without a `turn.request`; stream one with `sayDelta(sayId, text)` and
 `sayDone(sayId)` (put `speed`, 0.7–1.2, on the first delta). The line's
 `turn.complete` carries its `say_id`, and it ends with one `line.ended` saying
-what the viewer heard; `interrupt()` or a new `say_id` stops it. REST has
-`say(sessionId, text, {sayId, speed})` too. `updateSession(id, {systemPrompt})`
+what the viewer heard, with a `status` (`completed`, `interrupted` or
+`failed`) and a `reason` (`completed`, `host_interrupt`, `new_line`,
+`user_message`, `barge_in`, `playback_unconfirmed`, `failed` or
+`session_ended`); `interrupt()` or a new `say_id` stops it. REST has
+`say(sessionId, text, {sayId, speed, queue})` too.
+
+`{queue: true}` (Python `queue=True`, Go `LineOptions{Queue: true}` with
+`SayWith` / `SayDeltaWith`) makes a line wait until the one being spoken has
+finished instead of interrupting it; on a streamed line put it on the first
+delta. At most 8 lines wait: one more gets an `error` event
+`{code: "say_queue_full", say_id}` and never plays. `interrupt()` clears the
+queue, and each waiting line gets its `line.ended`. A `say_id` is single-use:
+reusing a finished one gets `say_id_reused`. `updateSession(id, {systemPrompt})`
 (or `updatePrompt` on the socket) changes a managed session's instructions
 mid-call, and `createSession({..., idempotencyKey})` makes a retried create
 return the first session.
@@ -155,8 +166,18 @@ const session = await client.createSession({
 const stream = await client.connect(session.session_id);
 await stream.live;
 await stream.say("Welcome to lesson three.", "lesson-3");
+await stream.say("Take your time.", "lesson-3-hint", { queue: true }); // plays after lesson-3
 await stream.message(transcribedLearnerText); // comes back as a turn.request
 ```
+
+A host line's captions (`transcript`) carry its `say_id`, and a line cut short
+ends with a final caption `{interrupted: true}` of what was heard. A session
+that ends mid-line sends each open line's `line.ended` (`reason:
+"session_ended"`) before `session.ended`, whose `reason` is `ended_by_host`
+(your `endSession`), `client_disconnect`, `viewer_left`, `max_duration`,
+`idle`, `credits_exhausted`, `billing_unavailable`, `core_disconnected` or
+`session_closed`; treat an unknown one like `session_closed`. The face stream
+(`controls`) is sent only on the events socket, never to the embed page.
 
 ## Lipsync API (Enterprise)
 
@@ -166,7 +187,60 @@ await stream.message(transcribedLearnerText); // comes back as a turn.request
 `audio(bytes)` and `flush()`, and yields `ready`, `frames`, `flushed` and
 `error` messages. Python has `lipsync()` and `connect_lipsync()`; Go has
 `Lipsync()`, and `LipsyncStreamURL()` with `NewLipsyncStream(socket)`. The API
-is billed at 10 tokens per minute of audio.
+is billed at 10 tokens per minute of audio. An account runs up to eight clips
+and streams at once (`429 lipsync_concurrency_limit` past that); keep one
+stream open across lines and `flush()` between them, and know that a stream
+with no audio or command for 60 seconds is closed after an `idle_timeout`
+error.
+
+## Speech API (Enterprise)
+
+`synthesize(text, {voiceId, speed?, preset?, format?})` turns text into Anva
+TTS audio (24 kHz, 16-bit mono) plus the same 24 ARKit mouth curves as the
+Lipsync API, measured on that audio: sample `s` plays at `s / 24000` seconds
+and frame `n` describes the mouth at `n / 30` seconds. The SDK decodes the
+audio for you (`audio.data` is a `Uint8Array`, Python `bytes`, Go `[]byte`).
+`voiceId` must be a voice from `listVoices()`; `format` is `"wav"` (default)
+or `"pcm"`.
+
+```js
+import { writeFile } from "node:fs/promises";
+const line = await client.synthesize("Welcome back. Shall we pick up where we left off?", {
+  voiceId: "elevenlabs:JBFqnCBsd6RMkjVDRZzb",
+});
+await writeFile("line.wav", line.audio.data);
+const { fps, channels, frames } = line.curves;
+const jaw = channels.indexOf("jawOpen");
+frames.forEach((row, n) => rig.setAt(n / fps, "jawOpen", row[jaw])); // your renderer
+```
+
+`connectSpeech({voiceId?, speed?, preset?})` keeps one socket open for many
+lines: `speak(id, text, opts?)`, `cancel(id)` and `close()`, and iterate for
+`ready`, `curves`, `audio` (PCM decoded to bytes), `alignment`, `done`,
+`cancelled` and `error`. A line's curves always arrive **before** the audio
+they describe, so buffer curves until their audio plays. One line is spoken at
+a time: a `speak` while a line runs is refused with `busy_line`, so wait for
+its `done` or `cancel` it. A stream that gets no command for 60 seconds while
+nothing is spoken is closed after an `idle_timeout` error.
+
+```js
+const speech = await client.connectSpeech({ voiceId: "elevenlabs:JBFqnCBsd6RMkjVDRZzb" });
+await speech.speak("line-1", "Hello there.");
+for await (const msg of speech) {
+  if (msg.type === "curves") rig.queueCurves(msg.start, msg.values);
+  if (msg.type === "audio") player.enqueue(msg.data); // 24 kHz s16le mono
+  if (msg.type === "done" || msg.type === "error") break; // breaking closes the stream
+}
+```
+
+Python has `synthesize()` and `connect_speech()`; Go has `Synthesize()`, and
+`SpeechStreamURL()` with `NewSpeechStream(socket)`. Billing is per minute of
+audio generated (`capabilities().speech.tokens_per_minute`). An account holds
+four Speech requests and streams at once (`429 speech_concurrency_limit`);
+other errors are `text_too_long` (over 2,000 characters or 180 seconds of
+audio), `invalid_voice`, `voice_unavailable` (pick another voice),
+`speech_busy` (retry after `Retry-After`), `speech_failed` (retry) and
+`speech_unavailable` (not on this deployment).
 
 ## Validation
 

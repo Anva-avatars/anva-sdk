@@ -2,7 +2,7 @@
 
 Standard-library REST client and a bidirectional wrapper for your chosen
 WebSocket library. Install with
-`go get github.com/Anva-avatars/anva-sdk/go@v0.6.0`.
+`go get github.com/Anva-avatars/anva-sdk/go@v0.7.0`.
 
 ```go
 import (
@@ -48,9 +48,45 @@ transcribe the user themselves (push-to-talk). `Client.Say` and
 `CreateSessionParams.IdempotencyKey` makes a retried create return the first
 session, and `EventsWSURL(id, anva.WithoutControls())` leaves out the face
 stream.
+`Client.SayWith` and `Realtime.SayWith` / `SayDeltaWith` take
+`anva.LineOptions{Speed, Queue}`; `Queue: true` makes a line wait behind the
+one being spoken instead of interrupting it.
 `Client.Lipsync` returns a clip's mouth curves; stream with
 `NewLipsyncStream(socket)` dialled at `client.LipsyncStreamURL(16000, "")` with
-`client.AuthHeader()` (Enterprise).
+`client.AuthHeader()` (Enterprise; up to eight jobs at once per account, and a
+stream idle for 60 seconds is closed).
+
+Speech API (Enterprise): text to 24 kHz speech plus its mouth curves.
+
+```go
+line, err := client.Synthesize(ctx, anva.SpeechParams{
+    Text: "Welcome back.", VoiceID: "elevenlabs:JBFqnCBsd6RMkjVDRZzb",
+})
+if err != nil { return err }
+os.WriteFile("line.wav", line.Audio.Data, 0o644) // decoded bytes
+// line.Curves.Frames[n][i] is line.Curves.Channels[i] at n/30 s.
+
+conn, _, err := websocket.DefaultDialer.Dial(
+    client.SpeechStreamURL(anva.SpeakOptions{VoiceID: "elevenlabs:JBFqnCBsd6RMkjVDRZzb"}),
+    client.AuthHeader())
+if err != nil { return err }
+speech := anva.NewSpeechStream(conn)
+defer speech.Close()
+speech.Speak("line-1", "Hello there.", anva.SpeakOptions{})
+for {
+    ev, err := speech.Receive()
+    if err != nil { return err }
+    switch ev.Type {
+    case "curves": queueCurves(ev.Start, ev.Values) // before their audio
+    case "audio":  play(ev.Data)                    // 24 kHz s16le mono
+    case "done", "error": return nil
+    }
+}
+```
+
+One line is spoken at a time per stream (`busy_line` otherwise; `Cancel(id)`
+stops one), and the server closes a stream that gets no command for 60 seconds
+while nothing is spoken.
 
 Errors are `*anva.Error` with `Status`, `Code`, `Message`. See the repository
 README for protocol details.

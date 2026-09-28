@@ -7,6 +7,44 @@ Release steps are in RELEASING.md.
 
 ## Unreleased
 
+## 0.7.0 — 2026-09-29
+
+- Speech API (Enterprise): `synthesize` / `synthesize` / `Synthesize`
+  (`POST /speech`) turns text into 24 kHz Anva TTS audio plus the 24 ARKit
+  mouth curves measured on it, with optional character alignment. The SDKs
+  decode the audio (`Uint8Array` / `bytes` / `[]byte`). Types: JS
+  `SpeechResult`, Python `SpeechResult` (a TypedDict), Go `SpeechResult`.
+- Speech stream (Enterprise): `connectSpeech` / `connect_speech` and Go
+  `NewSpeechStream` with `SpeechStreamURL` (`/speech/stream`) speak lines over
+  one socket with `speak(id, text)`, `cancel(id)` and `close()`, yielding
+  `ready`, `curves`, `audio` (PCM decoded to bytes), `alignment`, `done`,
+  `cancelled` and `error`. Curves arrive before their audio; one line at a
+  time (`busy_line`); the server closes a stream idle for 60 seconds.
+- Queued host lines: `queue: true` / `queue=True` / `LineOptions{Queue: true}`
+  on REST `say`, socket `say` and a streamed line's first `sayDelta`
+  (Go: new `SayWith` and `SayDeltaWith`). A queued line waits for the one
+  being spoken instead of interrupting it; a ninth waiting line gets an `error`
+  `say_queue_full`.
+- TypeScript: `LineEnded` gains `reason` (`completed`, `host_interrupt`,
+  `new_line`, `user_message`, `barge_in`, `playback_unconfirmed`, `failed`,
+  `session_ended`) and `status: "failed"`; `spoken_until_ms` is now optional
+  (absent when the session ended mid-line). New `Transcript` (`say_id`,
+  `interrupted`), `SessionError` (`say_id`; codes including `say_id_reused`
+  and `say_queue_full`), `SessionEnded` / `SessionEndReason` (`ended_by_host`,
+  `client_disconnect`, `viewer_left`, `max_duration`, `idle`,
+  `credits_exhausted`, `billing_unavailable`, `core_disconnected`,
+  `session_closed`) and `SpeechState` (`control.speech_state`, which no longer
+  carries `duration_ms`; the SDK never typed it). `getSession` types
+  `end_reason`.
+- Server changes these releases follow (anva.ai since 2026-09-28): a session
+  ended with `DELETE` now reports `ended_by_host` (was `session_closed`), the
+  face stream (`controls`) reaches only the events socket and no longer the
+  embed page, the Lipsync API runs eight clips and streams at once per account
+  (was two) and closes a stream after 60 seconds without audio or a command,
+  and new HTTP error codes `speech_busy`, `speech_concurrency_limit`,
+  `speech_failed`, `speech_unavailable`, `voice_unavailable` and
+  `text_too_long` arrive as `AnvaError` / `*anva.Error` codes.
+
 ## 0.6.0 — 2026-09-27
 
 - `speech_speed` / `speechSpeed` / `SpeechSpeed` on session creation: the

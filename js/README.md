@@ -1,6 +1,6 @@
 # anva-sdk — JavaScript / TypeScript
 
-Install with `npm install anva-sdk@0.6.0`. REST uses Node 18+'s fetch. Realtime needs
+Install with `npm install anva-sdk@0.7.0`. REST uses Node 18+'s fetch. Realtime needs
 Node 22+'s WebSocket or an injected compatible constructor.
 
 ```js
@@ -34,9 +34,41 @@ the `ws` package both accept. The API key travels in the handshake's
 and sockets server-side. `AnvaError` exposes `status`, `code`, and `details`;
 command errors arrive as structured events. Never log authenticated event URLs.
 
+Host lines queue with `say(text, sayId, {queue: true})` (REST
+`say(sessionId, text, {sayId, queue: true})`, or `queue` on a streamed line's
+first `sayDelta`): the line waits for the one being spoken instead of
+interrupting it. The `line.ended` (`reason`, `status: "failed"`), `transcript`
+(`say_id`, `interrupted`), `error` (`say_id`) and `session.ended` payloads are
+typed as `LineEnded`, `Transcript`, `SessionError` and `SessionEnded`.
+
+## Speech API (Enterprise)
+
+```js
+import { writeFile } from "node:fs/promises";
+const line = await client.synthesize("Welcome back.", { voiceId: "elevenlabs:JBFqnCBsd6RMkjVDRZzb" });
+await writeFile("line.wav", line.audio.data);          // decoded Uint8Array
+const jaw = line.curves.channels.indexOf("jawOpen");
+const jawAt = n => line.curves.frames[n][jaw];          // frame n is n / 30 s into the audio
+
+const speech = await client.connectSpeech({ voiceId: "elevenlabs:JBFqnCBsd6RMkjVDRZzb" });
+await speech.speak("line-1", "Hello there.");
+for await (const msg of speech) {
+  if (msg.type === "curves") queueCurves(msg.start, msg.values); // before their audio
+  if (msg.type === "audio") play(msg.data);                      // 24 kHz s16le mono Uint8Array
+  if (msg.type === "done" || msg.type === "error") break;
+}
+```
+
+One line at a time per stream (`busy_line` otherwise; `cancel(id)` stops one),
+and the server closes a stream idle for 60 seconds. Lipsync streams also close
+after 60 seconds without audio or a command, and an account runs up to eight
+Lipsync jobs at once.
+
 All five canonical modes, capability/billing discovery, REST interrupt,
 presentation, PCM, push-to-talk (`speechInput`), host lines (`say`, `sayDelta`,
-`sayDone`) and Lipsync API (`lipsync`, `connectLipsync`) methods are typed in
-`index.d.ts`. Read the repository
+`sayDone`), Lipsync API (`lipsync`, `connectLipsync`) and Speech API
+(`synthesize`, `connectSpeech`) methods are typed in `index.d.ts`. The older
+`speech(sessionId, type, payload)` is the avatar_only PCM command, not the
+Speech API. Read the repository
 README for mode availability and flow-control requirements. Preset updates use
 the REST API's snake_case patch fields.

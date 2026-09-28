@@ -418,7 +418,7 @@ class Anva:
             headers={
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": content_type,
-                "User-Agent": "anva-python/0.6.0",
+                "User-Agent": "anva-python/0.7.0",
                 **(headers or {}),
             })
         try:

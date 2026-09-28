@@ -63,8 +63,29 @@ export interface Session {
 }
 /** Metered connected time, from GET /sessions/{id}: running while active, final once ended. */
 export interface SessionUsage { seconds: number; tokens: number; unit: string; }
-/** How much of a host line the viewer heard; exactly one per `say` line. */
-export interface LineEnded { say_id: string; status: 'completed' | 'interrupted'; spoken_text: string; spoken_until_ms: number; }
+/** Why a host line ended. New reasons may be added. */
+export type LineEndReason = 'completed' | 'host_interrupt' | 'new_line' | 'user_message' | 'barge_in' | 'playback_unconfirmed' | 'failed' | 'session_ended';
+/** How much of a host line the viewer heard; exactly one per `say` line. `spoken_text` is the line's authoritative text. */
+export interface LineEnded {
+  say_id: string;
+  status: 'completed' | 'interrupted' | 'failed';
+  reason: LineEndReason;
+  spoken_text: string;
+  /** How far into the line's audio playback got; absent when the session ended mid-line (`reason: "session_ended"`). */
+  spoken_until_ms?: number;
+}
+/** The `transcript` event. An assistant caption of a host line carries its `say_id`; a line cut short ends with a final caption of what was heard, `interrupted: true`. */
+export interface Transcript { role: 'user' | 'assistant'; text: string; final: boolean; say_id?: string; interrupted?: boolean; }
+/** `error` event codes a live session sends. New codes may be added: treat an unknown one as a failure of the current turn. */
+export type SessionErrorCode = 'command_failed' | 'session_not_connected' | 'conversation_failed' | 'external_reply_limit' | 'audio_buffer_overflow' | 'unsupported_input' | 'say_id_reused' | 'say_queue_full' | 'core_disconnected' | (string & {});
+/** The `error` event; `say_id` names the host line it is about. */
+export interface SessionError { code: SessionErrorCode; message: string; say_id?: string; }
+/** Why a session ended (`session.ended.reason`, `end_reason` on getSession). Treat an unknown reason like `session_closed`. */
+export type SessionEndReason = 'ended_by_host' | 'client_disconnect' | 'viewer_left' | 'max_duration' | 'idle' | 'credits_exhausted' | 'billing_unavailable' | 'core_disconnected' | 'session_closed' | (string & {});
+/** The `session.ended` event; every open host line gets its `line.ended` first. */
+export interface SessionEnded { session_id: string; reason: SessionEndReason; }
+/** The `control.speech_state` event. `content_s` is the position in the current audio generation: it resets after an interrupt and is not per line. */
+export interface SpeechState { speaking: boolean; content_s: number; generation: number; barge_in: boolean; }
 export interface Preset {
   id: string; name: string; avatar_id: string;
   /** Deprecated alias. */ visual_character_id?: string;
@@ -82,10 +103,16 @@ export interface PresentationContext {
 export interface PresentationStart { version: 1; demo: string; revision: number; }
 export interface EventsOptions {
   WebSocketImpl?: new (url: string, options: { headers: Record<string, string> }) => WebSocket;
-  /** false leaves the per-frame face stream (`controls`) out of the events. */
+  /** false leaves the per-frame face stream (`controls`) out of the events. `controls` is sent only on this socket, never to the embed page. */
   controls?: boolean;
 }
-export interface SayOptions { sayId?: string; /** This line's speaking rate, 0.7–1.2. */ speed?: number; }
+export interface LineOptions {
+  /** This line's speaking rate, 0.7–1.2. */
+  speed?: number;
+  /** Wait behind the line being spoken instead of interrupting it (at most 8 wait; one more gets an `error` `say_queue_full`). */
+  queue?: boolean;
+}
+export interface SayOptions extends LineOptions { sayId?: string; }
 export type PCMBytes = Uint8Array | ArrayBuffer;
 export declare class AnvaError extends Error {
   constructor(status: number, code: string, message: string, details?: Record<string, unknown>);
@@ -106,9 +133,9 @@ export declare class RealtimeSession implements AsyncIterable<SessionEvent> {
   turnDelta(turnId: string, text: string): Promise<void>;
   turnDone(turnId: string): Promise<void>;
   turnCancel(turnId: string, reason?: string): Promise<void>;
-  say(text: string, sayId?: string, options?: { speed?: number }): Promise<void>;
-  /** Put `speed` on a streamed line's first delta. */
-  sayDelta(sayId: string, text: string, options?: { speed?: number }): Promise<void>;
+  say(text: string, sayId?: string, options?: LineOptions): Promise<void>;
+  /** Put `speed` and `queue` on a streamed line's first delta. */
+  sayDelta(sayId: string, text: string, options?: LineOptions): Promise<void>;
   /** Replace a managed session's instructions mid-call (session.update). */
   updatePrompt(systemPrompt: string): Promise<void>;
   sayDone(sayId: string): Promise<void>;
@@ -146,6 +173,57 @@ export declare class LipsyncStream implements AsyncIterable<LipsyncMessage> {
   close(): void;
   [Symbol.asyncIterator](): AsyncGenerator<LipsyncMessage, void, void>;
 }
+export type SpeechFormat = 'wav' | 'pcm';
+export interface SynthesizeOptions {
+  /** Required: a voice from listVoices() (its id, e.g. "elevenlabs:…"). */
+  voiceId: string;
+  /** 0.7–1.2; the server default is 0.85. */
+  speed?: number;
+  preset?: LipsyncPreset;
+  /** "wav" (default): a complete WAV file. "pcm": raw 16-bit little-endian mono samples. */
+  format?: SpeechFormat;
+}
+/** Mouth curves on the audio's clock: frames[n][i] is channels[i] at n / fps seconds; frame_count = ceil(samples / 800). */
+export interface SpeechCurves {
+  fps: number; channels: string[]; frame_count: number;
+  preset: LipsyncPreset; model: string; release: string; frames: number[][];
+}
+/** Character timing in seconds on the audio clock. */
+export interface SpeechAlignment { characters: string[]; starts: number[]; ends: number[]; }
+export interface SpeechResult {
+  id: string; voice_id: string; sample_rate: number; duration_s: number;
+  /** `data` is decoded from base64 by the SDK. */
+  audio: { format: SpeechFormat; data: Uint8Array };
+  curves: SpeechCurves;
+  /** Present when the voice provider returns it. */
+  alignment?: SpeechAlignment;
+  billing: { unit: string; basis: string; seconds: number; tokens_per_minute: number };
+  [key: string]: unknown;
+}
+export interface SpeechStreamDefaults { voiceId?: string; speed?: number; preset?: LipsyncPreset; }
+export interface SpeechStreamOptions extends EventsOptions, SpeechStreamDefaults {}
+export type SpeechStreamErrorCode = 'bad_request' | 'text_too_long' | 'invalid_voice' | 'voice_unavailable' | 'insufficient_tokens' | 'busy_line' | 'speech_busy' | 'speech_failed' | 'speech_unavailable' | 'credits_exhausted' | 'idle_timeout' | (string & {});
+export type SpeechMessage =
+  | { type: 'ready'; sample_rate: number; fps: number; channels: string[]; preset: LipsyncPreset; max_text_chars: number; release: string }
+  | { type: 'curves'; id: string; start: number; values: number[][] }
+  | { type: 'audio'; id: string; start_sample: number; samples: number; sample_rate: number; /** 16-bit little-endian mono PCM, decoded by the SDK. */ data: Uint8Array }
+  | { type: 'alignment'; id: string; characters: string[]; starts: number[]; ends: number[] }
+  | { type: 'done'; id: string; total_samples: number; frame_count: number; duration_s: number }
+  | { type: 'cancelled'; id: string; total_samples: number; frame_count: number }
+  | { type: 'error'; id?: string; code: SpeechStreamErrorCode; message: string };
+/** Speech API stream (Enterprise). Curves arrive before their audio; one line
+ * at a time (a speak during a line is refused with busy_line); closed by the
+ * server after 60 s idle. Breaking iteration closes the socket. */
+export declare class SpeechStream implements AsyncIterable<SpeechMessage> {
+  constructor(socket: WebSocket);
+  ready: Promise<SpeechStream>;
+  closed: boolean;
+  speak(id: string, text: string, options?: SpeechStreamDefaults): Promise<void>;
+  cancel(id: string): Promise<void>;
+  /** Sends {type: "close"} and closes the socket. */
+  close(): void;
+  [Symbol.asyncIterator](): AsyncGenerator<SpeechMessage, void, void>;
+}
 export interface AvatarInfo {
   id: string; name: string; kind: 'builtin' | 'official' | 'custom'; ready: boolean;
   icon?: string;
@@ -156,7 +234,7 @@ export declare class Anva {
   constructor(apiKey: string, opts?: AnvaOptions);
   apiKey: string; baseUrl: string;
   createSession(params: CreateSessionParams): Promise<Session>;
-  getSession(sessionId: string): Promise<Record<string, unknown> & { usage?: SessionUsage }>;
+  getSession(sessionId: string): Promise<Record<string, unknown> & { usage?: SessionUsage; end_reason?: SessionEndReason }>;
   endSession(sessionId: string): Promise<Record<string, unknown>>;
   /** Replace a managed session's instructions while it runs (PATCH /sessions/{id}). */
   updateSession(sessionId: string, params: { systemPrompt: string }): Promise<Record<string, unknown>>;
@@ -178,6 +256,10 @@ export declare class Anva {
   lipsyncStreamUrl(options?: {sampleRate?: 16000 | 24000; preset?: LipsyncPreset}): string;
   connectLipsync(options?: LipsyncStreamOptions): Promise<LipsyncStream>;
   listVoices(): Promise<Record<string, unknown>>;
+  /** Speech API (Enterprise): text to 24 kHz audio plus its mouth curves. */
+  synthesize(text: string, options: SynthesizeOptions): Promise<SpeechResult>;
+  speechStreamUrl(options?: SpeechStreamDefaults): string;
+  connectSpeech(options?: SpeechStreamOptions): Promise<SpeechStream>;
   listLanguages(): Promise<Record<string, unknown>>;
   updateContext(sessionId: string, context: PresentationContext): Promise<Record<string, unknown>>;
   startPresentation(sessionId: string, start: PresentationStart): Promise<Record<string, unknown>>;

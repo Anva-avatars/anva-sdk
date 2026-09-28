@@ -111,3 +111,42 @@ test('socket lines carry speed, instructions change live, and controls can be le
  assert.deepEqual(socket.sent,[{type:'say',payload:{text:'Slowly.',say_id:'a',speed:0.8}},{type:'say.delta',payload:{say_id:'b',text:'Try ',speed:0.9}},{type:'session.update',payload:{system_prompt:'Speak slowly.'}}]);
  stream.close();
 });
+test('synthesize posts the line and decodes the audio',async()=>{
+ const old=globalThis.fetch;
+ globalThis.fetch=async(url,options)=>{requests.push({url,options,body:JSON.parse(options.body)});return new Response(JSON.stringify({id:'speech_1',voice_id:'elevenlabs:v',sample_rate:24000,duration_s:0.1,audio:{format:'pcm',data:'AID/fw=='},curves:{fps:30,channels:['jawOpen'],frame_count:3,preset:'hybrid',model:'m',release:'r',frames:[[0.1],[0.2],[0.3]]},billing:{unit:'tokens',basis:'audio_time',seconds:0.1,tokens_per_minute:120}}),{status:200});};
+ try{
+  const result=await client.synthesize('Hi.',{voiceId:'elevenlabs:v',speed:0.9,preset:'lowlat',format:'pcm'});
+  assert.equal(requests.at(-1).url,'https://fixture.invalid/api/v2/speech');assert.equal(requests.at(-1).options.method,'POST');
+  assert.deepEqual(requests.at(-1).body,{text:'Hi.',voice_id:'elevenlabs:v',speed:0.9,preset:'lowlat',format:'pcm'});
+  assert.ok(result.audio.data instanceof Uint8Array);assert.deepEqual([...result.audio.data],[0,128,255,127]);
+  assert.equal(result.audio.data.buffer.byteLength,4);assert.equal(result.curves.frames[2][0],0.3);
+  await client.synthesize('Hi.',{voiceId:'elevenlabs:v'});assert.deepEqual(requests.at(-1).body,{text:'Hi.',voice_id:'elevenlabs:v'});
+  await assert.rejects(client.synthesize('Hi.'),/voiceId/);
+ }finally{globalThis.fetch=old;}
+});
+test('speech stream speaks, cancels, decodes audio and closes',async()=>{
+ assert.equal(client.speechStreamUrl(),'wss://fixture.invalid/api/v2/speech/stream');
+ const stream=await client.connectSpeech({voiceId:'elevenlabs:v',speed:0.9,preset:'lowlat',WebSocketImpl:FakeWS});const socket=FakeWS.sockets.at(-1);
+ assert.equal(socket.url,'wss://fixture.invalid/api/v2/speech/stream?voice_id=elevenlabs%3Av&speed=0.9&preset=lowlat');
+ assert.equal(socket.options.headers.Authorization,'Bearer fixture-key');
+ await stream.speak('l1','Hello.');await stream.speak('l2','Hi.',{voiceId:'elevenlabs:w',speed:1.1,preset:'hybrid'});await stream.cancel('l2');
+ assert.deepEqual(socket.sent,[{type:'speak',id:'l1',text:'Hello.'},{type:'speak',id:'l2',text:'Hi.',voice_id:'elevenlabs:w',speed:1.1,preset:'hybrid'},{type:'cancel',id:'l2'}]);
+ socket.emit({type:'ready',sample_rate:24000,fps:30,channels:['jawOpen'],preset:'lowlat',max_text_chars:2000,release:'r'});
+ socket.emit({type:'curves',id:'l1',start:0,values:[[0.5]]});
+ socket.emit({type:'audio',id:'l1',start_sample:0,samples:2,sample_rate:24000,data:'AID/fw=='});
+ socket.emit({type:'done',id:'l1',total_samples:2,frame_count:1,duration_s:0.0001});
+ const seen=[];
+ for await(const message of stream){seen.push(message);if(message.type==='done')break;}
+ assert.deepEqual(seen.map(m=>m.type),['ready','curves','audio','done']);
+ assert.ok(seen[2].data instanceof Uint8Array);assert.equal(new DataView(seen[2].data.buffer).getInt16(2,true),32767);
+ assert.deepEqual(socket.sent.at(-1),{type:'close'});assert.equal(socket.readyState,3);
+ await assert.rejects(stream.speak('l3','Late.'),/not open/);
+});
+test('say queues on REST and on the socket',async()=>{
+ await client.say('s','Next.',{sayId:'l2',queue:true});
+ assert.deepEqual(requests.at(-1).body,{text:'Next.',say_id:'l2',queue:true});
+ const stream=await client.connect('s',{WebSocketImpl:FakeWS});const socket=FakeWS.sockets.at(-1);
+ await stream.say('After.','a',{queue:true});await stream.sayDelta('b','Then ',{queue:true,speed:0.9});await stream.say('Now.','c');
+ assert.deepEqual(socket.sent,[{type:'say',payload:{text:'After.',say_id:'a',queue:true}},{type:'say.delta',payload:{say_id:'b',text:'Then ',speed:0.9,queue:true}},{type:'say',payload:{text:'Now.',say_id:'c'}}]);
+ stream.close();
+});

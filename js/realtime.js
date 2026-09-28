@@ -56,17 +56,21 @@ export class RealtimeSession {
   turnDelta(turnId, text) { return this.send('turn.delta', { turn_id: turnId, text }); }
   turnDone(turnId) { return this.send('turn.done', { turn_id: turnId }); }
   turnCancel(turnId, reason = '') { return this.send('turn.cancel', { turn_id: turnId, reason }); }
-  /** Speak a host line in the session voice (byo_llm). */
-  /** Speak `text` verbatim; `speed` (0.7–1.2) sets this line's rate. */
-  say(text, sayId, { speed } = {}) {
+  /** Speak a host line verbatim in the session voice (byo_llm). `speed`
+   * (0.7–1.2) sets this line's rate; `queue: true` waits behind the line being
+   * spoken instead of interrupting it (at most 8 wait; one more is refused
+   * with an `error` event `say_queue_full`). */
+  say(text, sayId, { speed, queue } = {}) {
     const payload = sayId ? { text, say_id: sayId } : { text };
     if (speed !== undefined) payload.speed = speed;
+    if (queue !== undefined) payload.queue = queue;
     return this.send('say', payload);
   }
-  /** Stream a line; put `speed` on its first delta. */
-  sayDelta(sayId, text, { speed } = {}) {
+  /** Stream a line; put `speed` and `queue` on its first delta. */
+  sayDelta(sayId, text, { speed, queue } = {}) {
     const payload = { say_id: sayId, text };
     if (speed !== undefined) payload.speed = speed;
+    if (queue !== undefined) payload.queue = queue;
     return this.send('say.delta', payload);
   }
   /** Replace a managed session's instructions mid-call (session.update). */
@@ -109,6 +113,57 @@ export class LipsyncStream extends RealtimeSession {
   }
   /** End an utterance: the remaining frames arrive, then `flushed`. */
   flush() { return this.send('flush'); }
+}
+/** Speech API stream (Enterprise): text in, curves and 24 kHz PCM out. Iterate
+ * for `ready`, `curves`, `audio`, `alignment`, `done`, `cancelled` and `error`
+ * messages; an `audio` message's `data` is decoded to a Uint8Array of 16-bit
+ * little-endian mono PCM. A line's curves always arrive before the audio they
+ * describe. One line at a time: a `speak` while a line runs is refused with
+ * `busy_line`. The server closes a stream idle for 60 s (`idle_timeout`). */
+export class SpeechStream extends RealtimeSession {
+  constructor(socket) {
+    super(socket);
+    socket.onmessage = event => {
+      let message;
+      try { message = JSON.parse(event.data); } catch { return; }
+      if (message?.type === 'audio' && typeof message.data === 'string') message.data = decodeBase64(message.data);
+      this.queue.push(message);
+      this.wake();
+    };
+  }
+  async command(message) {
+    await this.ready;
+    if (this.closed || this.socket.readyState !== 1) throw new Error('Speech socket is not open');
+    this.socket.send(JSON.stringify(message));
+  }
+  /** Speak one line; `id` (1–128 characters) is echoed on its every event.
+   * `voiceId`, `speed` and `preset` override the stream's defaults. */
+  speak(id, text, { voiceId, speed, preset } = {}) {
+    const message = { type: 'speak', id, text };
+    if (voiceId !== undefined) message.voice_id = voiceId;
+    if (speed !== undefined) message.speed = speed;
+    if (preset !== undefined) message.preset = preset;
+    return this.command(message);
+  }
+  /** Stop a line; it ends with `cancelled`. */
+  cancel(id) { return this.command({ type: 'cancel', id }); }
+  /** Tell the server the stream is finished, then close the socket. */
+  close() {
+    if (!this.closeRequested && !this.closed && this.socket.readyState === 1) {
+      try { this.socket.send(JSON.stringify({ type: 'close' })); } catch { /* closing anyway */ }
+    }
+    super.close();
+  }
+}
+export function decodeBase64(text) {
+  if (typeof globalThis.Buffer === 'function') {
+    // Copied out of Buffer's shared pool so `.buffer` holds only this audio.
+    return new Uint8Array(globalThis.Buffer.from(text, 'base64'));
+  }
+  const binary = globalThis.atob(text);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
 }
 export const speechStart = (turnId, text) => ({ turn_id: turnId, codec: 'pcm_s16le', sample_rate: 24000, channels: 1, ...(text === undefined ? {} : { text }) });
 export function speechAppend(turnId, seq, startSample, pcm) {

@@ -11,8 +11,8 @@
  * embed_url to the client.
  */
 
-import { RealtimeSession, LipsyncStream, speechStart, speechAppend } from "./realtime.js";
-export { RealtimeSession, LipsyncStream } from "./realtime.js";
+import { RealtimeSession, LipsyncStream, SpeechStream, speechStart, speechAppend, decodeBase64 } from "./realtime.js";
+export { RealtimeSession, LipsyncStream, SpeechStream } from "./realtime.js";
 
 const DEFAULT_BASE_URL = "https://anva.ai";
 let warnedEventsUrl = false;
@@ -123,12 +123,14 @@ export class Anva {
   /** Speak `text` verbatim in the session voice (byo_llm), without a
    * turn.request. Resolves with `{status, say_id}`; the line's `turn.complete`
    * event carries the same `say_id`, and the line ends with one `line.ended`.
-   * `speed` (0.7–1.2) sets this line's speaking rate. Needs the viewer
+   * `speed` (0.7–1.2) sets this line's speaking rate. `queue: true` waits
+   * behind the line being spoken instead of interrupting it. Needs the viewer
    * connected. */
-  say(sessionId, text, { sayId, speed } = {}) {
+  say(sessionId, text, { sayId, speed, queue } = {}) {
     const body = { text };
     if (sayId) body.say_id = sayId;
     if (speed !== undefined) body.speed = speed;
+    if (queue !== undefined) body.queue = queue;
     return this._request("POST", `/api/v2/sessions/${enc(sessionId)}/say`, body);
   }
 
@@ -199,6 +201,37 @@ export class Anva {
     const WS = WebSocketImpl || globalThis.WebSocket;
     if (!WS) throw new Error('No WebSocket implementation; pass { WebSocketImpl }');
     const stream = new LipsyncStream(new WS(this.lipsyncStreamUrl({ sampleRate, preset }), { headers: this.authHeaders() }));
+    try { await stream.ready; return stream; } catch (error) { stream.close(); throw error; }
+  }
+  /** Text to speech plus mouth curves (Speech API, Enterprise): Anva TTS
+   * audio at 24 kHz and the 24 ARKit mouth channels at 30 fps measured on it.
+   * `audio.data` comes back decoded to a Uint8Array (a WAV file, or raw 16-bit
+   * little-endian mono PCM with `format: "pcm"`). */
+  async synthesize(text, { voiceId, speed, preset, format } = {}) {
+    if (!voiceId) throw new Error("synthesize requires voiceId (a voice from listVoices)");
+    const body = { text, voice_id: voiceId };
+    if (speed !== undefined) body.speed = speed;
+    if (preset !== undefined) body.preset = preset;
+    if (format !== undefined) body.format = format;
+    const result = await this._request("POST", "/api/v2/speech", body);
+    if (typeof result?.audio?.data === "string") result.audio.data = decodeBase64(result.audio.data);
+    return result;
+  }
+  /** The Speech stream's WebSocket URL; authenticate with `authHeaders()`.
+   * `voiceId`, `speed` and `preset` are defaults for the lines on it. */
+  speechStreamUrl({ voiceId, speed, preset } = {}) {
+    const query = new URLSearchParams();
+    if (voiceId) query.set("voice_id", voiceId);
+    if (speed !== undefined) query.set("speed", String(speed));
+    if (preset) query.set("preset", preset);
+    const qs = query.toString();
+    return `${this.baseUrl.replace(/^http/, "ws")}/api/v2/speech/stream${qs ? `?${qs}` : ""}`;
+  }
+  /** Speak lines over one socket (Enterprise): `speak`, `cancel`, `close`. */
+  async connectSpeech({ voiceId, speed, preset, WebSocketImpl } = {}) {
+    const WS = WebSocketImpl || globalThis.WebSocket;
+    if (!WS) throw new Error('No WebSocket implementation; pass { WebSocketImpl }');
+    const stream = new SpeechStream(new WS(this.speechStreamUrl({ voiceId, speed, preset }), { headers: this.authHeaders() }));
     try { await stream.ready; return stream; } catch (error) { stream.close(); throw error; }
   }
   capabilities() { return this._request('GET', '/api/v2/capabilities'); }

@@ -4,13 +4,13 @@ Clients for Anva's session, billing, capability and realtime-control APIs.
 API keys and authenticated sockets belong on your backend; give browsers only
 the returned `embed_url` for WebRTC audio/video.
 
-Install SDK **0.8.0**:
+Install SDK **0.8.1**:
 
 | Language | Install | Import |
 |---|---|---|
-| Python | `pip install "anva[ws]==0.8.0"` | `from anva import Anva` |
-| JavaScript / TypeScript | `npm install anva-sdk@0.8.0` | `import { Anva } from "anva-sdk"` |
-| Go | `go get github.com/Anva-avatars/anva-sdk/go@v0.8.0` | `import anva "github.com/Anva-avatars/anva-sdk/go"` |
+| Python | `pip install "anva[ws]==0.8.1"` | `from anva import Anva` |
+| JavaScript / TypeScript | `npm install anva-sdk@0.8.1` | `import { Anva } from "anva-sdk"` |
+| Go | `go get github.com/Anva-avatars/anva-sdk/go@v0.8.1` | `import anva "github.com/Anva-avatars/anva-sdk/go"` |
 
 The production base defaults to `https://anva.ai`. Set `base_url`, `baseUrl`, or
 `Client.BaseURL` to your updated deployment for local integration.
@@ -129,7 +129,22 @@ runs only while it is connected. The socket reports `session.info` at once and
 `turnCancel`, `say`, `sayDelta`, `sayDone`, `updatePrompt`, `updateContext`,
 `startPresentation`, and PCM methods; `connect(id, {controls: false})` leaves
 out the per-frame face stream. Python has the
-same methods in snake_case. Go's `NewRealtime(socket)` accepts a connection
+same methods in snake_case.
+
+Any other command goes through the generic send. `activate` takes a prepared
+(`standby=1`) session live: its conversation, the viewer's microphone and
+billing start, and the socket reports `session.activated`. Until then the
+session takes only `context.update`, `action` and `activate`, and one not
+activated within 120 seconds ends with `standby_expired`.
+
+| SDK | Activate on the socket |
+|---|---|
+| JavaScript | `await stream.send("activate")` |
+| Python | `stream.send("activate")` |
+| Go | `stream.Send("activate", map[string]any{})` |
+
+The REST equivalent, `POST /api/v2/sessions/{id}/activate`, has no SDK method
+yet (see [Not in the SDK yet](#not-in-the-sdk-yet)). Go's `NewRealtime(socket)` accepts a connection
 implementing `ReadJSON`, `WriteJSON`, and `Close` (for example Gorilla WebSocket).
 The SDK does not add a Go WebSocket dependency. Only one event reader may consume
 a socket. Do slow LLM work separately so cancellation events remain responsive.
@@ -205,8 +220,10 @@ ends with a final caption `{interrupted: true}` of what was heard. A session
 that ends mid-line sends each open line's `line.ended` (`reason:
 "session_ended"`) before `session.ended`, whose `reason` is `ended_by_host`
 (your `endSession`), `client_disconnect`, `viewer_left`, `max_duration`,
-`idle`, `credits_exhausted`, `billing_unavailable`, `core_disconnected` or
-`session_closed`; treat an unknown one like `session_closed`. The face stream
+`idle`, `standby_expired` (a prepared session not activated within 120
+seconds; never billed), `credits_exhausted`, `billing_unavailable`,
+`core_disconnected`, `connection_ended` or `session_closed`; treat an unknown
+one like `session_closed`. The face stream
 (`controls`) is sent only on the events socket, never to the embed page.
 
 ## Lipsync API (Enterprise)
@@ -271,6 +288,27 @@ other errors are `text_too_long` (over 2,000 characters or 180 seconds of
 audio), `invalid_voice`, `voice_unavailable` (pick another voice),
 `speech_busy` (retry after `Retry-After`), `speech_failed` (retry) and
 `speech_unavailable` (not on this deployment).
+
+## Not in the SDK yet
+
+These API features have no SDK method in 0.8.1. Call the REST API directly
+(`https://anva.ai/api/v2`, `Authorization: Bearer <key>`); the
+[API docs](https://anva.ai/docs) give the requests and responses.
+
+- Custom voices (Enterprise): design (`POST /voices/designs`), save or clone
+  (`POST /voices`), read (`GET /voices/{id}`) and delete
+  (`DELETE /voices/{id}`). `listVoices()` returns your own voices first but
+  takes no filters.
+- Voice catalogue filters: `GET /voices?language=&accent=&gender=&age=&tone=&q=&owned=true`.
+- Standby activation over REST: `POST /sessions/{id}/activate` (on the socket,
+  send `activate` with the generic send, as above).
+- The `livekit` block on `POST /sessions` (the LiveKit integration,
+  `livekit-plugins-anva`, sends it for you).
+- Avatar creation (Enterprise): `/avatar-creations` and
+  `/avatar-creations/capabilities`.
+- Instances: create (`POST /instances`), read (`GET /instances/{id}`), rename
+  (`PATCH /instances/{id}`) and delete (`DELETE /instances/{id}`);
+  `listInstances()` exists.
 
 ## Validation
 

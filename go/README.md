@@ -2,7 +2,7 @@
 
 Standard-library REST client and a bidirectional wrapper for your chosen
 WebSocket library. Install with
-`go get github.com/Anva-avatars/anva-sdk/go@v0.8.0`.
+`go get github.com/Anva-avatars/anva-sdk/go@v0.8.1`.
 
 ```go
 import (
@@ -93,6 +93,14 @@ for {
 One line is spoken at a time per stream (`busy_line` otherwise; `Cancel(id)`
 stops one), and the server closes a stream that gets no command for 60 seconds
 while nothing is spoken.
+
+A prepared (`standby=1`) session goes live with
+`stream.Send("activate", map[string]any{})`; one not activated within 120
+seconds ends with `standby_expired`. Not in the SDK yet: custom voices (design, save/clone, read, delete), voice catalogue filters,
+standby activation over REST (`POST /sessions/{id}/activate`), the `livekit`
+block on create session, avatar creation, and instance create/read/rename/delete
+have no SDK method yet: call the REST API directly (see the repository README,
+"Not in the SDK yet").
 
 Errors are `*anva.Error` with `Status`, `Code`, `Message`. See the repository
 README for protocol details.

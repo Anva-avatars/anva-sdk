@@ -295,7 +295,7 @@ export class Anva {
       headers: {
         Authorization: `Bearer ${this.apiKey}`,
         "Content-Type": rawType || "application/json",
-        "User-Agent": "anva-js/0.8.0",
+        "User-Agent": "anva-js/0.8.1",
         ...extraHeaders,
       },
       body: body === undefined ? undefined : rawType ? body : JSON.stringify(body),

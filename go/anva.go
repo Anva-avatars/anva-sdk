@@ -375,7 +375,7 @@ func (c *Client) send(ctx context.Context, method, path, contentType string, bod
 	}
 	req.Header.Set("Authorization", "Bearer "+c.APIKey)
 	req.Header.Set("Content-Type", contentType)
-	req.Header.Set("User-Agent", "anva-go/0.8.0")
+	req.Header.Set("User-Agent", "anva-go/0.8.1")
 	for _, h := range headers {
 		for k, vs := range h {
 			for _, v := range vs {

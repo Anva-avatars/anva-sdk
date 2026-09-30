@@ -1,6 +1,6 @@
 # anva — Python SDK
 
-Install with `pip install "anva[ws]==0.8.0"`.
+Install with `pip install "anva[ws]==0.8.1"`.
 The REST client uses the standard library. Realtime uses `websockets`' sync API.
 
 ```python
@@ -74,3 +74,11 @@ All six service modes are supported as request values, subject to deployment
 capabilities. PCM methods accept `bytes`, `bytearray` or byte-oriented `memoryview`:
 24kHz signed16 little-endian mono, maximum 24,000 bytes per chunk. Read the
 repository README for sample offsets, backpressure and real playback requirements.
+
+A prepared (`standby=1`) session goes live with `stream.send("activate")` on
+the connection; one not activated within 120 seconds ends with
+`standby_expired`. Not in the SDK yet: custom voices (design, save/clone, read, delete), voice catalogue filters,
+standby activation over REST (`POST /sessions/{id}/activate`), the `livekit`
+block on create session, avatar creation, and instance create/read/rename/delete
+have no SDK method yet: call the REST API directly (see the repository README,
+"Not in the SDK yet").

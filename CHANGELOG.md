@@ -7,6 +7,23 @@ Release steps are in RELEASING.md.
 
 ## Unreleased
 
+## 0.8.1 — 2026-10-01
+
+Docs and types only; no new methods and no behaviour change.
+
+- TypeScript: `SessionEndReason` includes `standby_expired` (a prepared
+  `standby=1` session not activated within 120 seconds; never billed) and
+  `connection_ended`. The README's end-reason list includes them too.
+- TypeScript: `Capabilities` types the `lipsync` and `speech` blocks as
+  `LipsyncCapability` and `SpeechCapability` (all fields optional).
+- Docs: the socket `activate` command, sent with the generic send
+  (JS `stream.send("activate")`, Python `stream.send("activate")`, Go
+  `stream.Send("activate", map[string]any{})`), takes a prepared session live.
+- Docs: a "Not in the SDK yet" list (custom voices, voice catalogue filters,
+  REST standby activation, the `livekit` block on create session, avatar
+  creation, instance create/read/rename/delete); call the REST API directly
+  for these.
+
 ## 0.8.0 — 2026-10-01
 
 - **Server default changed (anva.ai since 2026-10-01):** a session created

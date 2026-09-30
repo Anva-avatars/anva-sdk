@@ -5,4 +5,4 @@ from .realtime import LipsyncStream, RealtimeSession, SpeechStream
 __all__ = ["Anva", "AnvaError", "LipsyncStream", "RealtimeSession", "SpeechAlignment", "SpeechAudio",
            "SpeechCurves", "SpeechResult", "SpeechStream"]
 
-__version__ = "0.8.0"
+__version__ = "0.8.1"

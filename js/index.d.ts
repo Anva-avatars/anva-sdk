@@ -50,7 +50,30 @@ export interface ModeCapability { id: ServiceMode; name: string; available: bool
   /** Whether the mode has a speaking-rate control (`speechSpeed`, per-line `speed`). */
   speech_speed?: boolean;
   [key: string]: unknown; }
-export interface Capabilities { api_version: string; modes: ModeCapability[]; audio_input?: Record<string, unknown>; [key: string]: unknown; }
+/** `capabilities().lipsync`: the Lipsync API (Enterprise) on this deployment. */
+export interface LipsyncCapability {
+  available?: boolean; plan?: string; endpoints?: string[];
+  fps?: number; channels?: number; stream_sample_rates?: number[];
+  /** Longest clip `lipsync()` accepts, in seconds. */
+  max_seconds?: number;
+  tokens_per_minute?: number;
+  [key: string]: unknown;
+}
+/** `capabilities().speech`: the Speech API (Enterprise) on this deployment. */
+export interface SpeechCapability {
+  available?: boolean; plan?: string; endpoints?: string[];
+  /** Audio sample rate in Hz (24000). */
+  sample_rate?: number;
+  fps?: number; channels?: number;
+  max_text_chars?: number; max_seconds?: number;
+  formats?: Array<'wav' | 'pcm' | (string & {})>;
+  tokens_per_minute?: number;
+  [key: string]: unknown;
+}
+export interface Capabilities { api_version: string; modes: ModeCapability[]; audio_input?: Record<string, unknown>;
+  lipsync?: LipsyncCapability;
+  speech?: SpeechCapability;
+  [key: string]: unknown; }
 export interface SessionBilling { unit: string; tokens_per_minute?: number; credits_per_minute?: number; rate_version: string; basis: string; [key: string]: unknown; }
 export interface Session {
   session_id: string;
@@ -88,8 +111,8 @@ export interface Transcript { role: 'user' | 'assistant'; text: string; final: b
 export type SessionErrorCode = 'command_failed' | 'session_not_connected' | 'conversation_failed' | 'external_reply_limit' | 'audio_buffer_overflow' | 'unsupported_input' | 'say_id_reused' | 'say_queue_full' | 'speed_unsupported' | 'core_disconnected' | (string & {});
 /** The `error` event; `say_id` names the host line it is about. */
 export interface SessionError { code: SessionErrorCode; message: string; say_id?: string; }
-/** Why a session ended (`session.ended.reason`, `end_reason` on getSession). Treat an unknown reason like `session_closed`. */
-export type SessionEndReason = 'ended_by_host' | 'client_disconnect' | 'viewer_left' | 'max_duration' | 'idle' | 'credits_exhausted' | 'billing_unavailable' | 'core_disconnected' | 'session_closed' | (string & {});
+/** Why a session ended (`session.ended.reason`, `end_reason` on getSession). `standby_expired`: a prepared (`standby=1`) session was not activated within 120 seconds and was never billed. `connection_ended`: metering stopped because the session's connection was gone and no other reason had been recorded. Treat an unknown reason like `session_closed`. */
+export type SessionEndReason = 'ended_by_host' | 'client_disconnect' | 'viewer_left' | 'max_duration' | 'idle' | 'standby_expired' | 'credits_exhausted' | 'billing_unavailable' | 'core_disconnected' | 'connection_ended' | 'session_closed' | (string & {});
 /** The `session.ended` event; every open host line gets its `line.ended` first. */
 export interface SessionEnded { session_id: string; reason: SessionEndReason; }
 /** The `control.speech_state` event. `content_s` is the position in the current audio generation: it resets after an interrupt and is not per line. */

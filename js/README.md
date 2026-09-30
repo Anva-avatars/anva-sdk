@@ -1,6 +1,6 @@
 # anva-sdk — JavaScript / TypeScript
 
-Install with `npm install anva-sdk@0.8.0`. REST uses Node 18+'s fetch. Realtime needs
+Install with `npm install anva-sdk@0.8.1`. REST uses Node 18+'s fetch. Realtime needs
 Node 22+'s WebSocket or an injected compatible constructor.
 
 ```js
@@ -77,4 +77,12 @@ presentation, PCM, push-to-talk (`speechInput`), host lines (`say`, `sayDelta`,
 `speech(sessionId, type, payload)` is the avatar_only PCM command, not the
 Speech API. Read the repository
 README for mode availability and flow-control requirements. Preset updates use
-the REST API's snake_case patch fields.
+the REST API's snake_case patch fields. `Capabilities` types the `lipsync` and
+`speech` blocks, and `SessionEndReason` includes `standby_expired`.
+
+A prepared (`standby=1`) session goes live with `await stream.send("activate")`
+on the events socket. Not in the SDK yet: custom voices (design, save/clone, read, delete), voice catalogue filters,
+standby activation over REST (`POST /sessions/{id}/activate`), the `livekit`
+block on create session, avatar creation, and instance create/read/rename/delete
+have no SDK method yet: call the REST API directly (see the repository README,
+"Not in the SDK yet").

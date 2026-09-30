@@ -57,7 +57,8 @@ export class RealtimeSession {
   turnDone(turnId) { return this.send('turn.done', { turn_id: turnId }); }
   turnCancel(turnId, reason = '') { return this.send('turn.cancel', { turn_id: turnId, reason }); }
   /** Speak a host line verbatim in the session voice (byo_llm). `speed`
-   * (0.7–1.2) sets this line's rate; `queue: true` waits behind the line being
+   * (0.7–1.2) sets this line's rate (an `error` event `speed_unsupported` on
+   * the Anva Realtime voice, which has no rate control); `queue: true` waits behind the line being
    * spoken instead of interrupting it (at most 8 wait; one more is refused
    * with an `error` event `say_queue_full`). */
   say(text, sayId, { speed, queue } = {}) {

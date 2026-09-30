@@ -1,11 +1,13 @@
 /** Official Anva SDK. All API keys and authenticated realtime sockets belong on your server. */
-export type ServiceMode = 'avatar_only' | 'byo_llm' | 'anva_light' | 'anva_expressive' | 'elevenagents_max';
+export type ServiceMode = 'avatar_only' | 'byo_llm' | 'anva_light' | 'anva_standard' | 'anva_expressive' | 'elevenagents_max';
+/** The voice a session uses: `fast` (anva_light), `standard` (anva_standard, no speaking-rate control) or `expressive`. Each managed mode pins its own. */
+export type PerformanceMode = 'fast' | 'standard' | 'expressive' | (string & {});
 /** "off": the host transcribes the user and sends text (push-to-talk); no microphone. */
 export type SpeechInput = 'on' | 'off';
 export interface AnvaOptions { baseUrl?: string; }
 export interface PerformanceOptions {
   conversation_provider?: string;
-  performance_mode?: string;
+  performance_mode?: PerformanceMode;
   elevenlabs_agent_id?: string;
   dynamic_expressions?: boolean;
   speech_speed?: number;
@@ -18,12 +20,13 @@ export interface CreateSessionParams {
   systemPrompt?: string;
   voiceId?: string;
   languageCode?: string;
+  /** Omitted, the server uses anva_standard (Anva Realtime, 70 tokens/min), or anva_light when `speechSpeed` is set. */
   serviceMode?: ServiceMode;
   /** Deprecated compatibility alias. Conflicts with serviceMode are rejected by the server. */
   llmMode?: string;
   performanceOptions?: PerformanceOptions;
   conversationProvider?: string;
-  performanceMode?: string;
+  performanceMode?: PerformanceMode;
   elevenlabsAgentId?: string;
   dynamicExpressions?: boolean;
   webhookUrl?: string;
@@ -32,16 +35,21 @@ export interface CreateSessionParams {
   maxDurationSeconds?: number;
   /** Flat map (string/number/boolean values, ≤20 keys, ≤4 KB) echoed on the session, session.info and webhooks. */
   metadata?: Record<string, string | number | boolean>;
-  /** "off" for byo_llm, anva_light or anva_expressive hosts that transcribe the user themselves. */
+  /** "off" for byo_llm, anva_light, anva_standard or anva_expressive hosts that transcribe the user themselves. */
   speechInput?: SpeechInput;
-  /** Speaking rate, 0.7–1.2 (1 is the voice's natural pace). anva_light and byo_llm voices. */
+  /** Speaking rate, 0.7–1.2 (1 is the voice's natural pace). anva_light and byo_llm voices; with no `serviceMode` the session is created as anva_light. anva_standard (or performance mode `standard`) has no speaking-rate control and is refused with 400 `speed_unsupported`. */
   speechSpeed?: number;
   /** Start with the avatar's eyes closed; they open once the viewer's video is showing. session.info reports wake_up false for avatars that cannot close their eyes convincingly. */
   wakeUp?: boolean;
   /** Sent as the Idempotency-Key header (16–128 letters, digits, - or _): a retry with the same key and body within 24 hours returns the first session. */
   idempotencyKey?: string;
 }
-export interface ModeCapability { id: ServiceMode; name: string; available: boolean; reason?: string; input?: string[]; [key: string]: unknown; }
+export interface ModeCapability { id: ServiceMode; name: string; available: boolean; reason?: string; input?: string[];
+  /** True on the mode a session gets when it names none. */
+  default?: boolean;
+  /** Whether the mode has a speaking-rate control (`speechSpeed`, per-line `speed`). */
+  speech_speed?: boolean;
+  [key: string]: unknown; }
 export interface Capabilities { api_version: string; modes: ModeCapability[]; audio_input?: Record<string, unknown>; [key: string]: unknown; }
 export interface SessionBilling { unit: string; tokens_per_minute?: number; credits_per_minute?: number; rate_version: string; basis: string; [key: string]: unknown; }
 export interface Session {
@@ -77,7 +85,7 @@ export interface LineEnded {
 /** The `transcript` event. An assistant caption of a host line carries its `say_id`; a line cut short ends with a final caption of what was heard, `interrupted: true`. */
 export interface Transcript { role: 'user' | 'assistant'; text: string; final: boolean; say_id?: string; interrupted?: boolean; }
 /** `error` event codes a live session sends. New codes may be added: treat an unknown one as a failure of the current turn. */
-export type SessionErrorCode = 'command_failed' | 'session_not_connected' | 'conversation_failed' | 'external_reply_limit' | 'audio_buffer_overflow' | 'unsupported_input' | 'say_id_reused' | 'say_queue_full' | 'core_disconnected' | (string & {});
+export type SessionErrorCode = 'command_failed' | 'session_not_connected' | 'conversation_failed' | 'external_reply_limit' | 'audio_buffer_overflow' | 'unsupported_input' | 'say_id_reused' | 'say_queue_full' | 'speed_unsupported' | 'core_disconnected' | (string & {});
 /** The `error` event; `say_id` names the host line it is about. */
 export interface SessionError { code: SessionErrorCode; message: string; say_id?: string; }
 /** Why a session ended (`session.ended.reason`, `end_reason` on getSession). Treat an unknown reason like `session_closed`. */
@@ -107,7 +115,7 @@ export interface EventsOptions {
   controls?: boolean;
 }
 export interface LineOptions {
-  /** This line's speaking rate, 0.7–1.2. */
+  /** This line's speaking rate, 0.7–1.2. Refused with `speed_unsupported` on a session using the Anva Realtime voice (anva_standard), and the line gets no `line.ended`. */
   speed?: number;
   /** Wait behind the line being spoken instead of interrupting it (at most 8 wait; one more gets an `error` `say_queue_full`). */
   queue?: boolean;

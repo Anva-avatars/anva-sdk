@@ -1,6 +1,6 @@
 # anva-sdk — JavaScript / TypeScript
 
-Install with `npm install anva-sdk@0.7.0`. REST uses Node 18+'s fetch. Realtime needs
+Install with `npm install anva-sdk@0.8.0`. REST uses Node 18+'s fetch. Realtime needs
 Node 22+'s WebSocket or an injected compatible constructor.
 
 ```js
@@ -34,6 +34,12 @@ the `ws` package both accept. The API key travels in the handshake's
 and sockets server-side. `AnvaError` exposes `status`, `code`, and `details`;
 command errors arrive as structured events. Never log authenticated event URLs.
 
+A session that names no `serviceMode` is `anva_standard` (Anva Realtime, 70
+tokens/minute). It has no speaking-rate control: for `speechSpeed` or a
+per-line `speed`, create the session with `serviceMode: "anva_light"` (Anva
+Realtime Lite), otherwise the server answers `speed_unsupported` (an
+`AnvaError` with status 400, or an `error` event on the socket).
+
 Host lines queue with `say(text, sayId, {queue: true})` (REST
 `say(sessionId, text, {sayId, queue: true})`, or `queue` on a streamed line's
 first `sayDelta`): the line waits for the one being spoken instead of
@@ -64,7 +70,7 @@ and the server closes a stream idle for 60 seconds. Lipsync streams also close
 after 60 seconds without audio or a command, and an account runs up to eight
 Lipsync jobs at once.
 
-All five canonical modes, capability/billing discovery, REST interrupt,
+All six canonical modes, capability/billing discovery, REST interrupt,
 presentation, PCM, push-to-talk (`speechInput`), host lines (`say`, `sayDelta`,
 `sayDone`), Lipsync API (`lipsync`, `connectLipsync`) and Speech API
 (`synthesize`, `connectSpeech`) methods are typed in `index.d.ts`. The older

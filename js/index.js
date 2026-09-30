@@ -55,9 +55,14 @@ export class Anva {
    * up to 20 keys, 4 KB serialized) stored with the session and echoed on
    * the session, on `session.info`, and in every webhook payload.
    *
-   * `speechInput: "off"` (byo_llm, anva_light, anva_expressive) is for hosts
-   * that transcribe the user themselves, such as push-to-talk: the embed opens
-   * no microphone and each user turn arrives through `sendMessage`.
+   * `serviceMode` omitted, the server uses anva_standard (Anva Realtime, 70
+   * tokens/min), or anva_light when `speechSpeed` is set. `speechSpeed`
+   * (0.7–1.2) applies to anva_light and byo_llm voices; anva_standard has no
+   * speaking-rate control and the create fails with 400 `speed_unsupported`.
+   *
+   * `speechInput: "off"` (byo_llm, anva_light, anva_standard, anva_expressive)
+   * is for hosts that transcribe the user themselves, such as push-to-talk: the
+   * embed opens no microphone and each user turn arrives through `sendMessage`.
    *
    * @param {{presetId?: string, avatarId?: string, systemPrompt?: string,
    *   voiceId?: string, languageCode?: string, llmMode?: string,
@@ -107,7 +112,7 @@ export class Anva {
   }
 
   /** Replace a managed session's instructions while it runs; they apply from
-   * the next reply (anva_light, anva_expressive; added as context for
+   * the next reply (anva_light, anva_standard, anva_expressive; added as context for
    * elevenagents_max). On a live socket, `RealtimeSession.updatePrompt` does
    * the same. */
   updateSession(sessionId, { systemPrompt }) {
@@ -123,7 +128,9 @@ export class Anva {
   /** Speak `text` verbatim in the session voice (byo_llm), without a
    * turn.request. Resolves with `{status, say_id}`; the line's `turn.complete`
    * event carries the same `say_id`, and the line ends with one `line.ended`.
-   * `speed` (0.7–1.2) sets this line's speaking rate. `queue: true` waits
+   * `speed` (0.7–1.2) sets this line's speaking rate; a session on the Anva
+   * Realtime voice (anva_standard) refuses it with 400 `speed_unsupported`
+   * and the line gets no `line.ended`. `queue: true` waits
    * behind the line being spoken instead of interrupting it. Needs the viewer
    * connected. */
   say(sessionId, text, { sayId, speed, queue } = {}) {
@@ -288,7 +295,7 @@ export class Anva {
       headers: {
         Authorization: `Bearer ${this.apiKey}`,
         "Content-Type": rawType || "application/json",
-        "User-Agent": "anva-js/0.7.0",
+        "User-Agent": "anva-js/0.8.0",
         ...extraHeaders,
       },
       body: body === undefined ? undefined : rawType ? body : JSON.stringify(body),

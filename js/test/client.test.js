@@ -4,9 +4,9 @@ import { Anva, AnvaError } from '../index.js';
 const requests=[];
 const client=new Anva('fixture-key',{baseUrl:'https://fixture.invalid'});
 globalThis.fetch=async(url,options)=>{const json=options.headers['Content-Type']==='application/json';requests.push({url,options,body:options.body&&json?JSON.parse(options.body):options.body});return new Response(JSON.stringify({session_id:'s',service_mode:json?requests.at(-1).body?.service_mode:undefined,say_id:'say_1'}),{status:201});};
-test('five canonical modes and compatible explicit false options reach session creation',async()=>{
- for(const serviceMode of ['avatar_only','byo_llm','anva_light','anva_expressive','elevenagents_max']){
-  const result=await client.createSession({avatarId:'avatar',serviceMode,dynamicExpressions:false,performanceOptions:{performance_mode:'fast'}});
+test('six canonical modes and compatible explicit false options reach session creation',async()=>{
+ for(const serviceMode of ['avatar_only','byo_llm','anva_light','anva_standard','anva_expressive','elevenagents_max']){
+  const result=await client.createSession({avatarId:'avatar',serviceMode,dynamicExpressions:false,performanceOptions:{performance_mode:serviceMode==='anva_standard'?'standard':'fast'}});
   assert.equal(result.service_mode,serviceMode);assert.equal(requests.at(-1).body.dynamic_expressions,false);
   assert.equal(requests.at(-1).options.headers.Authorization,'Bearer fixture-key');
  }
@@ -149,4 +149,16 @@ test('say queues on REST and on the socket',async()=>{
  await stream.say('After.','a',{queue:true});await stream.sayDelta('b','Then ',{queue:true,speed:0.9});await stream.say('Now.','c');
  assert.deepEqual(socket.sent,[{type:'say',payload:{text:'After.',say_id:'a',queue:true}},{type:'say.delta',payload:{say_id:'b',text:'Then ',speed:0.9,queue:true}},{type:'say',payload:{text:'Now.',say_id:'c'}}]);
  stream.close();
+});
+test('Anva Realtime: no mode is sent unless named, and speed_unsupported surfaces as AnvaError',async()=>{
+ await client.createSession({presetId:'p'});assert.equal('service_mode' in requests.at(-1).body,false);
+ await client.createSession({presetId:'p',serviceMode:'anva_standard',performanceMode:'standard'});
+ assert.equal(requests.at(-1).body.service_mode,'anva_standard');assert.equal(requests.at(-1).body.performance_mode,'standard');
+ const old=globalThis.fetch;
+ globalThis.fetch=async()=>new Response(JSON.stringify({error:{code:'speed_unsupported',message:'Anva Realtime (anva_standard) has no speaking-rate control; use anva_light'}}),{status:400});
+ try{
+  const refused=e=>e instanceof AnvaError&&e.status===400&&e.code==='speed_unsupported'&&/use anva_light/.test(e.message);
+  await assert.rejects(client.createSession({presetId:'p',serviceMode:'anva_standard',speechSpeed:0.9}),refused);
+  await assert.rejects(client.say('s','Slowly.',{speed:0.8}),refused);
+ }finally{globalThis.fetch=old;}
 });

@@ -7,6 +7,38 @@ Release steps are in RELEASING.md.
 
 ## Unreleased
 
+## 0.8.0 — 2026-10-01
+
+- **Server default changed (anva.ai since 2026-10-01):** a session created
+  without a service mode is now `anva_standard` (Anva Realtime) at 70 tokens
+  per minute, where it was `anva_light` at 60. This applies to every SDK
+  version, because the SDKs send no mode unless you name one. Pass
+  `anva_light` to keep the previous voice and price. One exception: a session
+  that sets `speech_speed` and names no mode is still created as `anva_light`.
+- New service mode `anva_standard` (Anva Realtime): a managed conversation on
+  Anva's newest voice model, in 85 languages, at 70 tokens per minute. JS
+  `ServiceMode` includes `'anva_standard'`; Go adds `AnvaStandard`; Python
+  takes `service_mode="anva_standard"`. It has no speaking-rate control.
+- `anva_light` is now displayed as "Anva Realtime Lite" and `anva_expressive`
+  as "Anva Realtime Expressive". Ids, behaviour and rates are unchanged;
+  `anva_light` (60 tokens per minute, 32 languages) remains the mode with
+  `speech_speed` and per-line `speed`.
+- New error code `speed_unsupported`: `anva_standard` (or performance mode
+  `standard`) combined with `speech_speed` on session creation, or with a
+  per-line `speed` on `say`, is refused with HTTP 400 (`AnvaError` /
+  `*anva.Error`), and on the events socket with an `error` event. A line
+  refused this way produces no `line.ended`. TypeScript: `SessionErrorCode`
+  includes `'speed_unsupported'`.
+- New voice performance mode `standard`, beside `fast` and `expressive`.
+  TypeScript: new `PerformanceMode` type on `performanceMode` and
+  `PerformanceOptions.performance_mode` (other strings are still accepted).
+  Go: `PerformanceFast`, `PerformanceStandard`, `PerformanceExpressive`.
+- `capabilities().modes` rows carry `default` (the mode a session gets when it
+  names none) and `speech_speed` (whether the mode has a speaking-rate
+  control). TypeScript: both are typed on `ModeCapability`.
+- Docs and examples show `anva_standard`; the speaking-rate example uses
+  `anva_light`.
+
 ## 0.7.0 — 2026-09-29
 
 - Speech API (Enterprise): `synthesize` / `synthesize` / `Synthesize`

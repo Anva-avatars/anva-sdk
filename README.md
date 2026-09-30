@@ -4,13 +4,13 @@ Clients for Anva's session, billing, capability and realtime-control APIs.
 API keys and authenticated sockets belong on your backend; give browsers only
 the returned `embed_url` for WebRTC audio/video.
 
-Install SDK **0.7.0**:
+Install SDK **0.8.0**:
 
 | Language | Install | Import |
 |---|---|---|
-| Python | `pip install "anva[ws]==0.7.0"` | `from anva import Anva` |
-| JavaScript / TypeScript | `npm install anva-sdk@0.7.0` | `import { Anva } from "anva-sdk"` |
-| Go | `go get github.com/Anva-avatars/anva-sdk/go@v0.7.0` | `import anva "github.com/Anva-avatars/anva-sdk/go"` |
+| Python | `pip install "anva[ws]==0.8.0"` | `from anva import Anva` |
+| JavaScript / TypeScript | `npm install anva-sdk@0.8.0` | `import { Anva } from "anva-sdk"` |
+| Go | `go get github.com/Anva-avatars/anva-sdk/go@v0.8.0` | `import anva "github.com/Anva-avatars/anva-sdk/go"` |
 
 The production base defaults to `https://anva.ai`. Set `base_url`, `baseUrl`, or
 `Client.BaseURL` to your updated deployment for local integration.
@@ -38,11 +38,25 @@ Select `service_mode` at creation. Python uses `service_mode`, JS
 |---|---|---:|
 | `avatar_only` | PCM voice audio; you supply LLM/voice/transcription | 10 |
 | `byo_llm` | Text deltas for requested turns; optionally your own transcriptions (`speech_input: "off"`) and host lines (`say`) | 50 |
-| `anva_light` | User interaction and instructions | 60 |
-| `anva_expressive` | User interaction and instructions | 80 |
+| `anva_light` (Anva Realtime Lite) | User interaction and instructions; speaking-rate control | 60 |
+| `anva_standard` (Anva Realtime, the default) | User interaction and instructions | 70 |
+| `anva_expressive` (Anva Realtime Expressive) | User interaction and instructions | 80 |
 | `elevenagents_max` | User interaction and agent configuration | 120 |
 
-Always check `capabilities().modes` for deployment availability. Billing comes
+A session that names no mode is `anva_standard` (Anva Realtime): Anva's newest
+voice model, in 85 languages, with no speaking-rate control. `anva_light`
+(Anva Realtime Lite) has the lowest managed price and the speaking-rate control
+(`speech_speed`, per-line `speed`), in 32 languages; a session that sets
+`speech_speed` and names no mode is created as `anva_light`. The voice
+performance modes (`performance_mode`) are `fast` (Lite), `standard`
+(Realtime) and `expressive`; each managed mode pins its own.
+
+Before 1 October 2026 a session without a mode was `anva_light` at 60
+tokens/minute. Pass `anva_light` to keep that voice and price.
+
+Always check `capabilities().modes` for deployment availability; each row
+carries `default` (the mode a session gets when it names none) and
+`speech_speed` (whether it has a speaking-rate control). Billing comes
 from the server, not these SDK constants; legacy accounts retain their own unit
 and contract. `GET /billing` returns the account view directly. Creating a mode
 that is unknown, inconsistent or unavailable fails with a structured API error.
@@ -53,13 +67,29 @@ that is unknown, inconsistent or unavailable fails with a structured API error.
 import { Anva } from "anva-sdk";
 const client = new Anva(process.env.ANVA_KEY);
 const capabilities = await client.capabilities();
-const mode = capabilities.modes.find(item => item.id === "anva_light");
+const mode = capabilities.modes.find(item => item.id === "anva_standard");
 if (!mode?.available) throw new Error(mode?.reason || "Mode unavailable");
 const session = await client.createSession({
-  presetId: "YOUR_PRESET_ID", serviceMode: "anva_light"
+  presetId: "YOUR_PRESET_ID", serviceMode: "anva_standard"
 });
 // Embed session.embed_url with microphone and autoplay permission.
 ```
+
+Omitting `serviceMode` gives the same session: Anva Realtime is the default.
+For a speaking rate, use Anva Realtime Lite:
+
+```js
+const slower = await client.createSession({
+  presetId: "YOUR_PRESET_ID", serviceMode: "anva_light", speechSpeed: 0.9
+});
+```
+
+`anva_standard` with `speechSpeed`, or a per-line `speed` on `say` /
+`sayDelta` sent to a session using its voice, is refused with
+`400 speed_unsupported` ("Anva Realtime (anva_standard) has no speaking-rate
+control; use anva_light"): an `AnvaError` / `*anva.Error` from `createSession`
+and REST `say`, and an `error` event with that code on the socket. A line
+refused this way produces no `line.ended`.
 
 Supply exactly one of a saved preset ID or an avatar ID with optional inline
 `systemPrompt`, `voiceId`, and `languageCode`. Deprecated `llmMode` aliases remain

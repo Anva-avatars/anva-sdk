@@ -134,8 +134,9 @@ same methods in snake_case.
 Any other command goes through the generic send. `activate` takes a prepared
 (`standby=1`) session live: its conversation, the viewer's microphone and
 billing start, and the socket reports `session.activated`. Until then the
-session takes only `context.update`, `action` and `activate`, and one not
-activated within 120 seconds ends with `standby_expired`.
+session refuses `message`, `say`/`say.delta` and `presentation.start` with
+`session_standby`, and one not activated within 120 seconds ends with
+`standby_expired`.
 
 | SDK | Activate on the socket |
 |---|---|

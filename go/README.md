@@ -2,7 +2,7 @@
 
 Standard-library REST client and a bidirectional wrapper for your chosen
 WebSocket library. Install with
-`go get github.com/Anva-avatars/anva-sdk/go@v0.7.0`.
+`go get github.com/Anva-avatars/anva-sdk/go@v0.8.0`.
 
 ```go
 import (
@@ -13,15 +13,21 @@ import (
 
 client := anva.New(os.Getenv("ANVA_KEY"))
 session, err := client.CreateSession(context.Background(), anva.CreateSessionParams{
-    PresetID: "YOUR_PRESET_ID", ServiceMode: anva.AnvaLight,
+    PresetID: "YOUR_PRESET_ID", ServiceMode: anva.AnvaStandard,
 })
 if err != nil { panic(err) }
 // Attach session.EmbedURL in your frontend.
 ```
 
 `Capabilities` and `Billing` return decoded maps. Service modes are `AvatarOnly`,
-`BYOLLM`, `AnvaLight`, `AnvaExpressive`, and `ElevenAgentsMax`. The server resolves
-availability, conflicts and billing. `LLMMode` remains a deprecated alias.
+`BYOLLM`, `AnvaLight`, `AnvaStandard`, `AnvaExpressive`, and `ElevenAgentsMax`. The
+server resolves availability, conflicts and billing. A session with no
+`ServiceMode` is `AnvaStandard` (Anva Realtime, 70 tokens/minute), which has no
+speaking-rate control: for `SpeechSpeed` or a per-line speed use `AnvaLight`
+(Anva Realtime Lite), otherwise the server answers `speed_unsupported` (a 400
+`*anva.Error`, or an `error` event on the socket). `PerformanceFast`,
+`PerformanceStandard` and `PerformanceExpressive` name the voice performance
+modes. `LLMMode` remains a deprecated alias.
 
 Connect a WebSocket to `client.EventsWSURL(session.SessionID)` on your backend,
 sending `client.AuthHeader()` with the handshake (for Gorilla:

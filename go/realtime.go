@@ -64,7 +64,9 @@ func (r *Realtime) Say(text, sayID string) error {
 	return r.Send("say", p)
 }
 
-// SayAtSpeed is Say with this line's speaking rate (0.7–1.2).
+// SayAtSpeed is Say with this line's speaking rate (0.7–1.2). On the Anva
+// Realtime voice (AnvaStandard), which has no rate control, the server answers
+// with an error event, code speed_unsupported.
 func (r *Realtime) SayAtSpeed(text, sayID string, speed float64) error {
 	p := map[string]any{"text": text, "speed": speed}
 	if sayID != "" {

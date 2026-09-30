@@ -25,7 +25,7 @@ func TestCanonicalModesAndCommands(t *testing.T) {
 	c := New("fixture-key")
 	c.BaseURL = server.URL
 	ctx := context.Background()
-	for _, mode := range []ServiceMode{AvatarOnly, BYOLLM, AnvaLight, AnvaExpressive, ElevenAgentsMax} {
+	for _, mode := range []ServiceMode{AvatarOnly, BYOLLM, AnvaLight, AnvaStandard, AnvaExpressive, ElevenAgentsMax} {
 		got, e := c.CreateSession(ctx, CreateSessionParams{AvatarID: "a", ServiceMode: mode})
 		if e != nil || got.ServiceMode != mode {
 			t.Fatal(got, e)

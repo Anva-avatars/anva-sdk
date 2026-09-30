@@ -30,8 +30,18 @@ const (
 	AvatarOnly      ServiceMode = "avatar_only"
 	BYOLLM          ServiceMode = "byo_llm"
 	AnvaLight       ServiceMode = "anva_light"
+	AnvaStandard    ServiceMode = "anva_standard"
 	AnvaExpressive  ServiceMode = "anva_expressive"
 	ElevenAgentsMax ServiceMode = "elevenagents_max"
+)
+
+// Voice performance modes (CreateSessionParams.PerformanceMode). Each managed
+// service mode pins its own: AnvaLight fast, AnvaStandard standard,
+// AnvaExpressive expressive. PerformanceStandard has no speaking-rate control.
+const (
+	PerformanceFast       = "fast"
+	PerformanceStandard   = "standard"
+	PerformanceExpressive = "expressive"
 )
 
 const DefaultBaseURL = "https://anva.ai"
@@ -65,6 +75,8 @@ func (e *Error) Error() string {
 
 // CreateSessionParams configures a new live session. Provide PresetID (embed
 // tier) OR AvatarID plus the persona fields (advanced tier, nothing stored).
+// With ServiceMode left empty the server uses AnvaStandard (Anva Realtime, 70
+// tokens/min), or AnvaLight when SpeechSpeed is set.
 type CreateSessionParams struct {
 	PresetID             string         `json:"preset_id,omitempty"`
 	AvatarID             string         `json:"avatar_id,omitempty"`
@@ -78,12 +90,14 @@ type CreateSessionParams struct {
 	PerformanceMode      string         `json:"performance_mode,omitempty"`
 	ElevenLabsAgentID    string         `json:"elevenlabs_agent_id,omitempty"`
 	DynamicExpressions   *bool          `json:"dynamic_expressions,omitempty"`
-	// SpeechInput "off" (BYOLLM, AnvaLight, AnvaExpressive) is for hosts that
-	// transcribe the user themselves, such as push-to-talk: the embed opens no
-	// microphone and each user turn arrives through SendMessage.
+	// SpeechInput "off" (BYOLLM, AnvaLight, AnvaStandard, AnvaExpressive) is
+	// for hosts that transcribe the user themselves, such as push-to-talk: the
+	// embed opens no microphone and each user turn arrives through SendMessage.
 	SpeechInput string `json:"speech_input,omitempty"`
 	// SpeechSpeed is the speaking rate, 0.7–1.2 (1 is the voice's natural
 	// pace), for anva_light and byo_llm voices; nil keeps the default.
+	// AnvaStandard (or PerformanceStandard) has no speaking-rate control and
+	// the create fails with a 400 *Error, Code "speed_unsupported".
 	SpeechSpeed *float64 `json:"speech_speed,omitempty"`
 	// WakeUp starts the call with the avatar's eyes closed; they open once
 	// the viewer's video is showing. session.info reports wake_up false for
@@ -177,7 +191,7 @@ func (c *Client) EndSession(ctx context.Context, sessionID string) error {
 }
 
 // UpdateSession replaces a managed session's instructions while it runs; they
-// apply from the next reply (AnvaLight, AnvaExpressive; added as context for
+// apply from the next reply (AnvaLight, AnvaStandard, AnvaExpressive; added as context for
 // ElevenAgentsMax). On a live connection, Realtime.UpdatePrompt does the same.
 func (c *Client) UpdateSession(ctx context.Context, sessionID, systemPrompt string) error {
 	body := map[string]string{"system_prompt": systemPrompt}
@@ -211,13 +225,17 @@ func (c *Client) Say(ctx context.Context, sessionID, text, sayID string) (string
 }
 
 // SayAtSpeed is Say with this line's speaking rate (0.7–1.2). Every line ends
-// with one line.ended event saying how much of it the viewer heard.
+// with one line.ended event saying how much of it the viewer heard. A session
+// on the Anva Realtime voice (AnvaStandard) has no speaking-rate control: the
+// call fails with a 400 *Error, Code "speed_unsupported", and the line gets
+// no line.ended.
 func (c *Client) SayAtSpeed(ctx context.Context, sessionID, text, sayID string, speed float64) (string, error) {
 	return c.say(ctx, sessionID, text, sayID, &speed)
 }
 
 // LineOptions shape one host line. Speed (0.7–1.2) sets its speaking rate; 0
-// keeps the session's. Queue waits behind the line being spoken instead of
+// keeps the session's (a session on AnvaStandard refuses a Speed with
+// speed_unsupported). Queue waits behind the line being spoken instead of
 // interrupting it (at most 8 wait; one more is refused with an error event
 // say_queue_full). On a streamed line, both are read from its first delta.
 type LineOptions struct {
@@ -357,7 +375,7 @@ func (c *Client) send(ctx context.Context, method, path, contentType string, bod
 	}
 	req.Header.Set("Authorization", "Bearer "+c.APIKey)
 	req.Header.Set("Content-Type", contentType)
-	req.Header.Set("User-Agent", "anva-go/0.7.0")
+	req.Header.Set("User-Agent", "anva-go/0.8.0")
 	for _, h := range headers {
 		for k, vs := range h {
 			for _, v := range vs {

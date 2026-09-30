@@ -1,6 +1,6 @@
 # anva — Python SDK
 
-Install with `pip install "anva[ws]==0.7.0"`.
+Install with `pip install "anva[ws]==0.8.0"`.
 The REST client uses the standard library. Realtime uses `websockets`' sync API.
 
 ```python
@@ -28,6 +28,12 @@ Use one reader per connection; perform slow LLM work in a separate cancellable
 worker so it can react to `turn.cancel`. `send_message` is user input, not
 verbatim assistant speech. `AnvaError` includes `status`, `code`, `message`,
 and `details`. Realtime command failures remain structured events.
+
+A session that names no `service_mode` is `anva_standard` (Anva Realtime, 70
+tokens/minute). It has no speaking-rate control: for `speech_speed` or a
+per-line `speed`, pass `service_mode="anva_light"` (Anva Realtime Lite),
+otherwise the server answers `speed_unsupported` (an `AnvaError` with status
+400, or an `error` event on the connection).
 
 `create_session(speech_input="off")` suits hosts that transcribe the user
 themselves (push-to-talk); `say` / `say_delta` / `say_done` speak lines of your
@@ -64,7 +70,7 @@ One line is spoken at a time per stream (`busy_line` otherwise; `cancel(id)`
 stops one), and the server closes a stream that gets no command for 60 seconds
 while nothing is spoken.
 
-All five service modes are supported as request values, subject to deployment
+All six service modes are supported as request values, subject to deployment
 capabilities. PCM methods accept `bytes`, `bytearray` or byte-oriented `memoryview`:
 24kHz signed16 little-endian mono, maximum 24,000 bytes per chunk. Read the
 repository README for sample offsets, backpressure and real playback requirements.

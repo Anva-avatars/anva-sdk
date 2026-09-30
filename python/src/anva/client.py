@@ -127,13 +127,18 @@ class Anva:
         up to 20 keys, 4 KB serialized) stored with the session and echoed on
         the session, on ``session.info`` and in every webhook payload.
 
-        ``speech_input="off"`` (byo_llm, anva_light, anva_expressive) is for
-        hosts that transcribe the user themselves, such as push-to-talk: the
-        embed opens no microphone and each user turn arrives through
-        ``send_message``.
+        ``service_mode`` omitted, the server uses anva_standard (Anva
+        Realtime, 70 tokens/min), or anva_light when ``speech_speed`` is set.
+
+        ``speech_input="off"`` (byo_llm, anva_light, anva_standard,
+        anva_expressive) is for hosts that transcribe the user themselves, such
+        as push-to-talk: the embed opens no microphone and each user turn
+        arrives through ``send_message``.
 
         ``speech_speed`` (0.7–1.2) sets the speaking rate for anva_light and
-        byo_llm voices. ``wake_up=True`` starts the call with the avatar's
+        byo_llm voices. anva_standard (or performance mode ``standard``) has
+        no speaking-rate control: the create raises ``AnvaError`` with code
+        ``speed_unsupported`` (400). ``wake_up=True`` starts the call with the avatar's
         eyes closed; they open once the viewer's video is showing
         (``session.info`` reports ``wake_up: false`` for avatars that cannot
         close their eyes convincingly).
@@ -184,7 +189,7 @@ class Anva:
 
     def update_session(self, session_id: str, *, system_prompt: str) -> Dict[str, Any]:
         """Replace a managed session's instructions while it runs; they apply
-        from the next reply (anva_light, anva_expressive; added as context for
+        from the next reply (anva_light, anva_standard, anva_expressive; added as context for
         elevenagents_max). On a live connection, ``update_prompt`` does the
         same."""
         return self._request("PATCH", f"/api/v2/sessions/{_esc(session_id)}",
@@ -204,7 +209,9 @@ class Anva:
         turn.request. Returns ``{"status", "say_id"}``; the line's
         ``turn.complete`` event carries the same ``say_id`` and it ends with
         one ``line.ended``. ``speed`` (0.7–1.2) sets this line's speaking
-        rate. ``queue=True`` waits behind the line being spoken instead of
+        rate; a session on the Anva Realtime voice (anva_standard) refuses it
+        with 400 ``speed_unsupported`` and the line gets no ``line.ended``.
+        ``queue=True`` waits behind the line being spoken instead of
         interrupting it. Needs the viewer connected."""
         body: Dict[str, Any] = {"text": text}
         if say_id:
@@ -418,7 +425,7 @@ class Anva:
             headers={
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": content_type,
-                "User-Agent": "anva-python/0.7.0",
+                "User-Agent": "anva-python/0.8.0",
                 **(headers or {}),
             })
         try:

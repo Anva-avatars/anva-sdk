@@ -27,7 +27,7 @@ class ClientTests(unittest.TestCase):
     def body(self): return json.loads(self.requests[-1].data)
     def test_modes_and_canonical_preset(self):
         with patch('urllib.request.urlopen', self.open):
-            for mode in ['avatar_only','byo_llm','anva_light','anva_expressive','elevenagents_max']:
+            for mode in ['avatar_only','byo_llm','anva_light','anva_standard','anva_expressive','elevenagents_max']:
                 result=self.client.create_session(avatar_id='a',service_mode=mode,dynamic_expressions=False)
                 self.assertEqual(result['service_mode'],mode);self.assertIs(self.body()['dynamic_expressions'],False)
             self.client.create_preset('Guide',visual_character_id='old');self.assertEqual(self.body()['avatar_id'],'old')
@@ -62,6 +62,19 @@ class ClientTests(unittest.TestCase):
             self.client.finish_speech('s','t',2);self.assertEqual(self.body()['payload']['total_samples'],2)
             for invalid in [b'',b'\0',bytes(24002)]:
                 with self.assertRaises(ValueError):self.client.append_speech('s','t',0,0,invalid)
+    def test_anva_realtime_default_and_speed_unsupported(self):
+        with patch('urllib.request.urlopen', self.open):
+            self.client.create_session('p');self.assertNotIn('service_mode',self.body())
+            self.client.create_session('p',service_mode='anva_standard',performance_mode='standard')
+            self.assertEqual(self.body()['service_mode'],'anva_standard');self.assertEqual(self.body()['performance_mode'],'standard')
+        message='Anva Realtime (anva_standard) has no speaking-rate control; use anva_light'
+        def refuse(req, timeout):
+            raise urllib.error.HTTPError('fixture',400,'Bad Request',{},io.BytesIO(json.dumps({'error':{'code':'speed_unsupported','message':message}}).encode()))
+        with patch('urllib.request.urlopen',refuse):
+            for call in (lambda:self.client.create_session('p',service_mode='anva_standard',speech_speed=0.9),
+                         lambda:self.client.say('s','Slowly.',speed=0.8)):
+                with self.assertRaises(AnvaError) as result:call()
+                self.assertEqual(result.exception.status,400);self.assertEqual(result.exception.code,'speed_unsupported');self.assertEqual(result.exception.message,message)
     def test_structured_error(self):
         body=json.dumps({'error':{'code':'mode_unavailable','message':'Unavailable','retryable':False}}).encode()
         with patch('urllib.request.urlopen',side_effect=urllib.error.HTTPError('fixture',503,'Unavailable',{},io.BytesIO(body))):

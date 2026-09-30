@@ -92,7 +92,9 @@ class RealtimeSession:
     def say(self, text: str, say_id: Optional[str] = None, *, speed: Optional[float] = None,
             queue: Optional[bool] = None) -> None:
         """Speak a host line in the session voice (byo_llm); ``speed``
-        (0.7–1.2) sets this line's rate. ``queue=True`` waits behind the line
+        (0.7–1.2) sets this line's rate (an ``error`` event
+        ``speed_unsupported`` on the Anva Realtime voice, which has no rate
+        control). ``queue=True`` waits behind the line
         being spoken instead of interrupting it (at most 8 wait; one more is
         refused with an ``error`` event ``say_queue_full``)."""
         payload: Dict[str, Any] = {"text": text}
